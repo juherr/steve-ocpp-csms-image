@@ -122,6 +122,7 @@ jobs:
             --build-arg DB_IP=127.0.0.1 \
             --build-arg BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             --build-arg VCS_REF="${GITHUB_SHA}" \
+            -t "${IMAGE}:${STEVE_REF}" \
             -t "${IMAGE}:${STEVE_REF}-java25" \
             .
 
@@ -140,15 +141,20 @@ jobs:
           GHCR_USER: ${{ github.actor }}
         run: echo "${GHCR_TOKEN}" | docker login ghcr.io -u "${GHCR_USER}" --password-stdin
 
-      # Only the release tag is pushed. A `sha-${GITHUB_SHA}` tag would double
-      # the number of stored versions for no benefit: consumers pin by digest.
+      # Both tags name the same manifest, so the second one costs no extra
+      # storage. `steve-X.Y.Z` follows the recommended JRE and moves when that
+      # changes; `steve-X.Y.Z-javaNN` stays on one JRE major.
+      #
+      # No `sha-${GITHUB_SHA}` tag: that one WOULD add a stored version per
+      # build, for no benefit — consumers pin by digest.
       - name: Push
         env:
           STEVE_REF: ${{ steps.ref.outputs.steve_ref }}
         run: |
           set -euo pipefail
+          docker push "${IMAGE}:${STEVE_REF}"
           docker push "${IMAGE}:${STEVE_REF}-java25"
-          echo "Pushed image: ${IMAGE}:${STEVE_REF}-java25"
+          echo "Pushed: ${IMAGE}:${STEVE_REF} and ${IMAGE}:${STEVE_REF}-java25"
           echo "Digest to pin:"
           docker inspect --format '{{ index .RepoDigests 0 }}' "${IMAGE}:${STEVE_REF}-java25"
 

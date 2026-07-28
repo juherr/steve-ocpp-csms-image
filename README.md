@@ -31,7 +31,12 @@ cannot drift apart.
 
 | Tag | Contents |
 | --- | --- |
-| `steve-<X.Y.Z>-java25` | SteVe release `steve-X.Y.Z`, running on a Temurin 25 JRE |
+| `steve-<X.Y.Z>` | SteVe release `steve-X.Y.Z` on the currently recommended JRE |
+| `steve-<X.Y.Z>-java25` | The same, with the JRE major pinned |
+
+Both tags name the same image for a given release. The plain tag follows the
+recommended JRE and will move if that changes; the suffixed one never does. Pick
+the suffixed tag if a JRE major bump would be a breaking change for you.
 
 There is deliberately no `latest` and no per-commit tag.
 
