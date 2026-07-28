@@ -1,0 +1,157 @@
+---
+# Build & push the SteVe image (OCPP CSMS) to GHCR.
+#
+# Runs on GitHub-hosted runners, never on a self-hosted one: this repository is
+# public, so a pull request from a fork would otherwise execute arbitrary code
+# on our own machine. Hosted runners are free and unlimited on public repos.
+#
+# SteVe runs its jOOQ code generation and its Flyway migrations against a LIVE
+# database during `mvn package`. We therefore start a throwaway MariaDB that
+# publishes 3306 on the runner, and build with `--network=host` so the RUN steps
+# share the runner's network namespace and reach it on 127.0.0.1.
+#
+# Why not a dedicated Docker network: BuildKit only accepts host/none/default
+# for `--network`. The legacy builder (DOCKER_BUILDKIT=0) did accept a custom
+# network, but it has been deprecated since Engine 23 — we stay on the supported
+# path. See the README for the exact same commands, runnable locally.
+#
+# No secret ever enters the image: sensitive configuration is injected at
+# runtime through environment variables (Spring externalized config).
+
+name: Build SteVe image
+
+on:
+  workflow_dispatch:
+    inputs:
+      steve_ref:
+        description: "SteVe release tag to build (e.g. steve-3.13.0)"
+        required: true
+        default: "steve-3.13.0"
+  push:
+    paths:
+      - "Dockerfile"
+      - "entrypoint.sh"
+      - "flyway-callbacks/**"
+      - ".github/workflows/build-image.yml"
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: steve-image
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/juherr/steve
+  # Default tag for `push` triggers (no input available there).
+  # renovate: datasource=github-releases depName=steve-community/steve
+  DEFAULT_STEVE_REF: "steve-3.13.0"
+  # Throwaway MariaDB for the code generation (same defaults as
+  # application-docker.properties). Its credentials only serve the build: no
+  # data, no secret, nothing of it reaches the image.
+  # renovate: datasource=docker depName=mariadb
+  BUILD_DB_IMAGE: "mariadb:11.8"
+
+jobs:
+  build:
+    name: build & push
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      # The tag comes from user input and is interpolated into shell commands
+      # below, so validate it against a strict format BEFORE any use.
+      - name: Resolve and validate the SteVe tag
+        id: ref
+        env:
+          INPUT_REF: ${{ inputs.steve_ref || env.DEFAULT_STEVE_REF }}
+        run: |
+          set -euo pipefail
+          if ! printf '%s' "$INPUT_REF" | grep -Eq '^steve-[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "Invalid SteVe tag: '$INPUT_REF' (expected steve-X.Y.Z)"; exit 1
+          fi
+          echo "steve_ref=$INPUT_REF" >> "$GITHUB_OUTPUT"
+
+      # Published on 0.0.0.0 rather than the loopback so that the documented
+      # fallback (`--add-host …:host-gateway`, no host networking) also works
+      # without touching this step. The runner is ephemeral and firewalled.
+      - name: Start the throwaway MariaDB (jOOQ/Flyway code generation)
+        run: |
+          set -euo pipefail
+          docker run -d --name steve-build-db \
+            -p 3306:3306 \
+            -e MARIADB_ROOT_PASSWORD=root \
+            -e MARIADB_DATABASE=stevedb \
+            -e MARIADB_USER=steve \
+            -e MARIADB_PASSWORD=changeme \
+            -e TZ="+00:00" \
+            "${BUILD_DB_IMAGE}" --innodb-use-native-aio=0
+
+      - name: Wait for the database to be ready
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 60); do
+            if docker exec steve-build-db \
+                 healthcheck.sh --connect --innodb_initialized; then
+              echo "Database ready."; exit 0
+            fi
+            echo "Database not ready yet ($i/60)…"; sleep 2
+          done
+          echo "Timeout: the build database never became ready."; exit 1
+
+      # Fails in seconds with a clear message instead of after eight minutes of
+      # Maven, should the build sandbox not reach the database.
+      - name: Probe build sandbox networking
+        run: |
+          set -euo pipefail
+          printf 'FROM alpine\nRUN nc -z -w3 127.0.0.1 3306 && echo REACHABLE\n' \
+            | docker build --network=host --progress=plain -
+
+      - name: Build the image
+        env:
+          STEVE_REF: ${{ steps.ref.outputs.steve_ref }}
+        run: |
+          set -euo pipefail
+          # 127.0.0.1 and not localhost: in the host network namespace localhost
+          # may resolve to ::1 first, while the published MariaDB listens on IPv4.
+          docker build \
+            --network=host \
+            --build-arg STEVE_REF="${STEVE_REF}" \
+            --build-arg DB_IP=127.0.0.1 \
+            -t "${IMAGE}:${STEVE_REF}-java25" \
+            .
+
+      # The recommended Compose healthcheck shells out to curl inside the
+      # container; make sure the runtime stage really ships it.
+      - name: Validate healthcheck dependency
+        env:
+          STEVE_REF: ${{ steps.ref.outputs.steve_ref }}
+        run: |
+          set -euo pipefail
+          docker run --rm --entrypoint curl "${IMAGE}:${STEVE_REF}-java25" --version >/dev/null
+
+      - name: Login to GHCR
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_USER: ${{ github.actor }}
+        run: echo "${GHCR_TOKEN}" | docker login ghcr.io -u "${GHCR_USER}" --password-stdin
+
+      # Only the release tag is pushed. A `sha-${GITHUB_SHA}` tag would double
+      # the number of stored versions for no benefit: consumers pin by digest.
+      - name: Push
+        env:
+          STEVE_REF: ${{ steps.ref.outputs.steve_ref }}
+        run: |
+          set -euo pipefail
+          docker push "${IMAGE}:${STEVE_REF}-java25"
+          echo "Pushed image: ${IMAGE}:${STEVE_REF}-java25"
+          echo "Digest to pin:"
+          docker inspect --format '{{ index .RepoDigests 0 }}' "${IMAGE}:${STEVE_REF}-java25"
+
+      - name: Cleanup
+        if: always()
+        run: |
+          docker rm -f steve-build-db || true
+          docker logout ghcr.io || true

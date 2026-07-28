@@ -1,0 +1,9 @@
+# The build context is the repository root, but only three paths are ever
+# COPYed (entrypoint.sh, flyway-callbacks/, and nothing else). Keep the context
+# small and make sure repository metadata can never end up in the image.
+.git
+.github
+*.md
+LICENSE
+NOTICE
+renovate.json

@@ -1,0 +1,98 @@
+# Ready-to-run Docker image for SteVe (OCPP CSMS).
+#
+# Why this image exists: upstream publishes NO official image, and its own
+# Dockerfile recompiles the application when the *container starts* (`mvnw` in
+# the CMD), which requires Maven and a live database on every (re)start. Here
+# the `.war` is compiled at *build* time, so startup is fast.
+#
+# No secrets in the image: SteVe >= 3.x is a Spring Boot application whose
+# application.yml resolves ${db.password}, ${auth.password}, ${db.ip}… from the
+# environment. Container environment variables (DB_PASSWORD, AUTH_PASSWORD,
+# DB_IP…) take precedence over the defaults baked into
+# application-docker.properties (changeme/admin/1234, which are upstream public
+# placeholders — not secrets). Inject the real configuration at runtime.
+#
+# Build quirk: Flyway (migrations) and jOOQ (code generation) read the schema of
+# a LIVE database during `mvn package`. The build therefore needs a throwaway
+# MariaDB, reachable from the RUN steps — see README and
+# .github/workflows/build-image.yml. Because that build database is thrown away,
+# the runtime database starts empty: the entrypoint replays the Flyway
+# migrations against it on startup (Flyway CLI + bundled scripts).
+
+# --- Build stage: compile the .war from a pinned upstream release tag ---------
+# renovate: datasource=github-releases depName=steve-community/steve
+ARG STEVE_REF=steve-3.13.0
+
+FROM eclipse-temurin:25.0.3_9-jdk AS build
+
+ARG STEVE_REF
+# Host of the throwaway database used by the jOOQ/Flyway code generation during
+# the build. Overridden by the workflow; `mariadb` is the default value found in
+# application-docker.properties.
+ARG DB_IP=mariadb
+
+ENV LANG=C.UTF-8 LC_ALL=C.UTF-8
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /code
+RUN git clone --depth 1 --branch "${STEVE_REF}" https://github.com/steve-community/steve.git .
+
+# -Pdocker  : envName=docker → the .war embeds application-docker.properties as
+#             its default profile (console logback, etc.).
+# -Pmariadb : databaseName=mariadb → jdbc:mariadb://... datasource.
+# -Ddb.ip   : points Flyway/jOOQ at the throwaway build database (port/schema/
+#             user/password keep the docker defaults: 3306 / stevedb / steve /
+#             changeme).
+# -DskipTests : we only want the .war; code generation runs in generate-sources.
+RUN ./mvnw -B -V -DskipTests -Dmaven.javadoc.skip=true \
+    -Pdocker,mariadb -Ddb.ip="${DB_IP}" \
+    clean package
+
+# --- Source of the Flyway CLI (migrates the runtime database on startup) ------
+# Official glibc image (not -alpine): its JRE and executable must run inside the
+# temurin runtime stage, which is glibc-based. Pinned tag.
+FROM flyway/flyway:13.0.0 AS flyway
+
+# --- Runtime stage: JRE + Flyway CLI + migration scripts + the .war -----------
+FROM eclipse-temurin:25.0.3_9-jre
+
+ARG STEVE_REF
+
+LABEL org.opencontainers.image.source="https://github.com/juherr/steve-ocpp-csms-image"
+LABEL org.opencontainers.image.version="${STEVE_REF}"
+LABEL org.opencontainers.image.licenses="GPL-3.0-or-later"
+LABEL org.opencontainers.image.title="SteVe (OCPP CSMS)"
+LABEL org.opencontainers.image.description="SteVe OCPP Central System, compiled at build time from an unmodified upstream release tag."
+
+ENV LANG=C.UTF-8 LC_ALL=C.UTF-8
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl \
+    && groupadd --system --gid 10001 steve \
+    && useradd --system --uid 10001 --gid steve --home-dir /nonexistent --shell /usr/sbin/nologin steve \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+# Flyway CLI (with its own JRE and MariaDB/MySQL drivers) + SteVe's migration
+# scripts taken from the very clone that produced the .war — binary and schema
+# therefore cannot drift apart.
+COPY --from=flyway /flyway /flyway
+COPY --from=build /code/src/main/resources/db/migration /flyway/sql
+# Flyway callbacks (afterConnect.sql) — replaces `-initSql`, removed in Flyway 13.
+COPY flyway-callbacks /flyway/callbacks
+COPY --from=build /code/target/steve.war /app/steve.war
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+# Flyway and SteVe only need network and read access to the packaged files.
+USER 10001:10001
+
+# Application HTTP port (management UI + OCPP endpoints). Internal HTTPS is left
+# disabled: terminate TLS at your reverse proxy.
+EXPOSE 8180
+
+# The entrypoint migrates the database (Flyway) and then starts the .war.
+ENTRYPOINT ["/entrypoint.sh"]

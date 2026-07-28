@@ -1,0 +1,44 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended"
+  ],
+  "labels": [
+    "dependencies"
+  ],
+  "packageRules": [
+    {
+      "matchPackageNames": [
+        "mariadb"
+      ],
+      "allowedVersions": "<12",
+      "description": "Stay on the MariaDB LTS track for the throwaway build database, matching what most SteVe deployments actually run"
+    }
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "SteVe release tag — the Dockerfile ARG and the workflow default must move together, so both are declared with the same depName and land in a single PR",
+      "managerFilePatterns": [
+        "/^Dockerfile$/",
+        "/^\\.github/workflows/build-image\\.yml$/"
+      ],
+      "matchStrings": [
+        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\s+ARG STEVE_REF=(?<currentValue>\\S+)",
+        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\s+DEFAULT_STEVE_REF: \"(?<currentValue>[^\"]+)\""
+      ],
+      "versioningTemplate": "regex:^steve-(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)$"
+    },
+    {
+      "customType": "regex",
+      "description": "Docker images referenced from the build workflow rather than from a FROM line",
+      "managerFilePatterns": [
+        "/^\\.github/workflows/build-image\\.yml$/"
+      ],
+      "matchStrings": [
+        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\s+\\w+_IMAGE: \"[^\"\\s:]+:(?<currentValue>[^\"\\s]+)\""
+      ],
+      "versioningTemplate": "docker"
+    }
+  ]
+}

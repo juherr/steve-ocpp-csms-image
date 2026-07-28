@@ -1,0 +1,79 @@
+steve-ocpp-csms-image
+Copyright 2026 Julien Herr
+
+The packaging files in this repository (Dockerfile, entrypoint.sh,
+flyway-callbacks/, GitHub Actions workflow) are licensed under the Apache
+License, Version 2.0. See LICENSE.
+
+The LICENSE file does NOT cover the contents of the Docker image these files
+produce. That image is an aggregate of separate, independently licensed
+programs, listed below.
+
+
+-------------------------------------------------------------------------------
+SteVe — GPL-3.0-or-later
+-------------------------------------------------------------------------------
+
+    https://github.com/steve-community/steve
+
+The `steve.war` shipped in this image is compiled from an UNMODIFIED upstream
+release tag. The Dockerfile performs:
+
+    git clone --depth 1 --branch ${STEVE_REF} \
+        https://github.com/steve-community/steve.git
+
+No patch, no override, no vendored change is applied. The exact tag used for a
+given image is recorded in its `org.opencontainers.image.version` label:
+
+    docker inspect --format '{{ index .Config.Labels "org.opencontainers.image.version" }}' \
+        ghcr.io/juherr/steve:<tag>
+
+GPLv3 section 6 requires that the corresponding source accompany the object
+code. It is satisfied here by section 6(d): the complete corresponding source of
+the exact revision is publicly available, at no charge, from the upstream
+repository at the tag named above. The complete build recipe used to produce the
+binary — this Dockerfile — is published in this repository.
+
+The `.war` also embeds SteVe's own Maven dependencies, each retaining its
+original license.
+
+
+-------------------------------------------------------------------------------
+Flyway CLI (Open Source Edition) — Apache-2.0
+-------------------------------------------------------------------------------
+
+    https://github.com/flyway/flyway
+    https://hub.docker.com/r/flyway/flyway
+
+Copied unmodified from the `flyway/flyway:13.0.0` image, which is the Open
+Source Edition. It is distinct from Redgate's commercial `redgate/flyway` image,
+which is the one requiring a license key and EULA acceptance.
+
+The Flyway CLI is used as a separate program, in a separate process, before
+SteVe starts: it replays SteVe's schema migrations against the runtime database.
+There is no linking between it and SteVe — this is mere aggregation.
+
+That upstream image also bundles a Java runtime and a set of JDBC drivers, each
+under its own license; refer to the `flyway/flyway` image for their terms.
+
+
+-------------------------------------------------------------------------------
+Eclipse Temurin JRE — GPL-2.0 WITH Classpath-exception-2.0
+-------------------------------------------------------------------------------
+
+    https://adoptium.net/
+
+Two independent runtimes are present:
+  - the image's own JRE (`eclipse-temurin:25.0.3_9-jre`), which runs SteVe;
+  - the JRE bundled inside the Flyway CLI, which runs Flyway.
+
+The Classpath Exception permits linking application code without extending the
+GPL to that application.
+
+
+-------------------------------------------------------------------------------
+Debian base system
+-------------------------------------------------------------------------------
+
+The Temurin images are Debian-based. The `curl` package installed at build time,
+and the base system itself, remain under their respective Debian licenses.
