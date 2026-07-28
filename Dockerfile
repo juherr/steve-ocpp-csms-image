@@ -60,9 +60,15 @@ FROM flyway/flyway:13.0.0 AS flyway
 FROM eclipse-temurin:25.0.3_9-jre
 
 ARG STEVE_REF
+# Build metadata. Without these, the image would silently inherit the base
+# image's own created/revision labels, which describe Temurin, not this build.
+ARG BUILD_DATE=""
+ARG VCS_REF=""
 
 LABEL org.opencontainers.image.source="https://github.com/juherr/steve-ocpp-csms-image"
 LABEL org.opencontainers.image.version="${STEVE_REF}"
+LABEL org.opencontainers.image.created="${BUILD_DATE}"
+LABEL org.opencontainers.image.revision="${VCS_REF}"
 LABEL org.opencontainers.image.licenses="GPL-3.0-or-later"
 LABEL org.opencontainers.image.title="SteVe (OCPP CSMS)"
 LABEL org.opencontainers.image.description="SteVe OCPP Central System, compiled at build time from an unmodified upstream release tag."
