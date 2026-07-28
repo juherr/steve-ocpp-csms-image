@@ -35,8 +35,14 @@ cannot drift apart.
 | `steve-<X.Y.Z>-java25` | The same, with the JRE major pinned |
 
 Both tags name the same image for a given release. The plain tag follows the
-recommended JRE and will move if that changes; the suffixed one never does. Pick
-the suffixed tag if a JRE major bump would be a breaking change for you.
+recommended JRE and will move if that changes; the suffixed one never does.
+
+**If you pin by digest — and you should — use the plain tag.** The digest is what
+Docker actually resolves, so the tag alongside it is documentation: a moving tag
+cannot change what you run. Meanwhile the suffixed tag stops being republished at
+the next JRE bump, which leaves version-tracking tools stranded on a dead tag with
+no signal. Reach for the suffixed tag only if you track tags *without* a digest
+and a JRE major bump would break you.
 
 There is deliberately no `latest` and no per-commit tag.
 
