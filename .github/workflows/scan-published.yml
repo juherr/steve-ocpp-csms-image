@@ -1,0 +1,147 @@
+---
+# Vulnerability scan of the images ALREADY PUBLISHED on GHCR.
+#
+# Why on a schedule rather than at build time: an image is scanned clean the day
+# it is built and says nothing about the day after. What a consumer of
+# ghcr.io/juherr/steve actually needs to know is whether the tag they pinned has
+# drifted into CVE territory since — which only a recurring scan of the
+# published artefact can answer. A build-time scan would have reported on an
+# image nobody had to keep, and the release would have gone out anyway.
+#
+# So this is a monitoring signal, not a gate: it never blocks anything, it tells
+# us when a rebuild is worth publishing.
+#
+# The tags are discovered from the registry instead of being restated here: the
+# SteVe release is already pinned in three places that must move together (see
+# AGENTS.md) and a fourth would rot.
+#
+# GitHub disables scheduled workflows after 60 days without repository activity;
+# on a packaging repository that can happen between two SteVe releases. If the
+# weekly run goes quiet, that is why — re-enable it from the Actions tab.
+
+name: Scan published images
+
+on:
+  schedule:
+    # Mondays, 06:17 UTC — off the hour, where the runner queues are shorter.
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+
+concurrency:
+  # Not cancel-in-progress: a manual dispatch during the weekly run would
+  # abandon a half-uploaded set of SARIF categories, leaving the Security tab
+  # showing some tags from this run and others from the previous one.
+  group: scan-published
+  cancel-in-progress: false
+
+env:
+  REGISTRY_REPO: juherr/steve
+
+jobs:
+  discover:
+    name: list published tags
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      tags: ${{ steps.tags.outputs.tags }}
+    steps:
+      # Asked to the registry, not to /users/juherr/packages/…: that REST
+      # endpoint is scoped to the *user* and needs a personal token with
+      # read:packages, which GITHUB_TOKEN is not. The registry answers the same
+      # question anonymously because the package is public, so this job needs no
+      # permission at all — and no pagination handling, unlike `gh api
+      # --paginate`, which emits one JSON document per page and would quietly
+      # write a multi-line value to GITHUB_OUTPUT past 30 versions.
+      - name: List the release tags on GHCR
+        id: tags
+        run: |
+          set -euo pipefail
+          token=$(curl -fsS \
+            "https://ghcr.io/token?scope=repository:${REGISTRY_REPO}:pull&service=ghcr.io" \
+            | jq -r .token)
+          # Anything that is not a steve-X.Y.Z release tag is not ours to
+          # monitor — same shape as the build's workflow_dispatch input.
+          #
+          # Only the three most recent releases: an immutable old tag's CVE list
+          # only ever grows and the answer for whoever pinned it is always "move
+          # up", which the newest scan already says. Scanning them forever would
+          # leave one stale `trivy-<retired tag>` category in the Security tab
+          # per release, for ever.
+          #
+          # sort_by on the numeric components, not plain sort: lexically
+          # steve-3.9.0 sorts after steve-3.13.0.
+          tags=$(curl -fsS -H "Authorization: Bearer ${token}" \
+            "https://ghcr.io/v2/${REGISTRY_REPO}/tags/list?n=1000" \
+            | jq -c '[(.tags // [])[] | select(test("^steve-[0-9]+\\.[0-9]+\\.[0-9]+$"))]
+                     | sort_by(ltrimstr("steve-") | split(".") | map(tonumber))
+                     | .[-3:]')
+          echo "Tags to scan: ${tags}"
+          echo "tags=${tags}" >> "$GITHUB_OUTPUT"
+
+  scan:
+    name: trivy ${{ matrix.tag }}
+    needs: discover
+    if: needs.discover.outputs.tags != '[]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      # A matrix rather than a loop in a single job — even though it is usually
+      # one element — because upload-sarif is an *action* and each tag needs its
+      # own `category:`. A `for tag in …` loop cannot invoke an action per
+      # iteration, so it would force one merged SARIF and lose the per-tag view.
+      matrix:
+        tag: ${{ fromJSON(needs.discover.outputs.tags) }}
+    env:
+      # renovate: datasource=docker depName=aquasec/trivy
+      TRIVY_IMAGE: "aquasec/trivy:0.72.0"
+    steps:
+      # upload-sarif resolves the commit and ref from the checkout in the
+      # workspace; without it the workspace is empty and the upload fails.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      # The secret scanner reads the image configuration and build history —
+      # where a credential passed through --build-arg or written on a RUN
+      # command line would be recorded forever. Verified behaviour; it is not a
+      # filesystem-wide sweep, and not a replacement for GitHub's push
+      # protection on the sources.
+      #
+      # Scanned once to JSON, then rendered twice offline. Running `trivy image`
+      # per output format would re-pull the ~490 MB image and re-download the
+      # vulnerability database for the second render.
+      - name: Scan ${{ matrix.tag }}
+        env:
+          TAG: ${{ matrix.tag }}
+          # Trivy's own registry-auth variables. Its database comes from
+          # ghcr.io, and authenticating avoids the anonymous rate limit — a
+          # common source of flaky runs.
+          TRIVY_USERNAME: ${{ github.actor }}
+          TRIVY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          docker run --rm -v "${PWD}:/work" -w /work \
+            -e TRIVY_USERNAME -e TRIVY_PASSWORD \
+            "${TRIVY_IMAGE}" image "ghcr.io/${REGISTRY_REPO}:${TAG}" \
+              --scanners vuln,secret --exit-code 0 \
+              --format json --output trivy.json
+
+          docker run --rm -v "${PWD}:/work" -w /work "${TRIVY_IMAGE}" \
+            convert --format sarif --output trivy.sarif trivy.json
+          # --scanners again on the table render: convert needs to be told which
+          # scanners produced the JSON, or it prints "No enabled scanners found"
+          # and skips the summary. It does not infer it from the report.
+          docker run --rm -v "${PWD}:/work" -w /work "${TRIVY_IMAGE}" \
+            convert --scanners vuln,secret \
+              --format table --severity HIGH,CRITICAL trivy.json
+
+      # One category per tag, otherwise each upload would overwrite the previous
+      # one and the Security tab would only ever show the last tag scanned.
+      - name: Upload the report to code scanning
+        uses: github/codeql-action/upload-sarif@e58424170fb0262c8d7ed60a2e84b9bffe205c67 # codeql-bundle-v2.26.1
+        with:
+          sarif_file: trivy.sarif
+          category: trivy-${{ matrix.tag }}

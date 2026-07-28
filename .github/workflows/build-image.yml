@@ -26,10 +26,29 @@ on:
       steve_ref:
         description: "SteVe release tag to build (e.g. steve-3.13.0)"
         required: true
+        # renovate: datasource=github-releases depName=steve-community/steve
         default: "steve-3.13.0"
   push:
+    # This trigger publishes the release tag, so keep it on the default branch:
+    # a push on a work branch would otherwise overwrite
+    # ghcr.io/juherr/steve:steve-X.Y.Z with an image built from an unmerged
+    # commit — including its org.opencontainers.image.revision label.
+    branches:
+      - main
     paths:
       - "Dockerfile"
+      - ".dockerignore"
+      - "entrypoint.sh"
+      - "flyway-callbacks/**"
+      - ".github/workflows/build-image.yml"
+  # Same job on pull requests, minus the login and the push: merging to main
+  # publishes, so the build has to have been proven before the merge, not after.
+  # Keep the path list identical to the push one above — YAML anchors are not
+  # supported here, so this is a copy that has to be maintained as one.
+  pull_request:
+    paths:
+      - "Dockerfile"
+      - ".dockerignore"
       - "entrypoint.sh"
       - "flyway-callbacks/**"
       - ".github/workflows/build-image.yml"
@@ -39,8 +58,10 @@ permissions:
   packages: write
 
 concurrency:
-  group: steve-image
-  cancel-in-progress: false
+  # Releases queue rather than cancel each other; pull request runs supersede
+  # their own previous run.
+  group: steve-image-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   IMAGE: ghcr.io/juherr/steve
@@ -123,7 +144,6 @@ jobs:
             --build-arg BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             --build-arg VCS_REF="${GITHUB_SHA}" \
             -t "${IMAGE}:${STEVE_REF}" \
-            -t "${IMAGE}:${STEVE_REF}-java25" \
             .
 
       # The recommended Compose healthcheck shells out to curl inside the
@@ -133,30 +153,31 @@ jobs:
           STEVE_REF: ${{ steps.ref.outputs.steve_ref }}
         run: |
           set -euo pipefail
-          docker run --rm --entrypoint curl "${IMAGE}:${STEVE_REF}-java25" --version >/dev/null
+          docker run --rm --entrypoint curl "${IMAGE}:${STEVE_REF}" --version >/dev/null
 
       - name: Login to GHCR
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
         env:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GHCR_USER: ${{ github.actor }}
         run: echo "${GHCR_TOKEN}" | docker login ghcr.io -u "${GHCR_USER}" --password-stdin
 
-      # Both tags name the same manifest, so the second one costs no extra
-      # storage. `steve-X.Y.Z` follows the recommended JRE and moves when that
-      # changes; `steve-X.Y.Z-javaNN` stays on one JRE major.
+      # One tag per SteVe release, and nothing else. The JRE is a build detail
+      # recorded in the image (see the README), not part of the tag: a JRE bump
+      # is not a new SteVe release and must not fragment the tag namespace.
       #
-      # No `sha-${GITHUB_SHA}` tag: that one WOULD add a stored version per
-      # build, for no benefit — consumers pin by digest.
+      # No `latest`, and no `sha-${GITHUB_SHA}` tag: the latter WOULD add a
+      # stored version per build, for no benefit — consumers pin by digest.
       - name: Push
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
         env:
           STEVE_REF: ${{ steps.ref.outputs.steve_ref }}
         run: |
           set -euo pipefail
           docker push "${IMAGE}:${STEVE_REF}"
-          docker push "${IMAGE}:${STEVE_REF}-java25"
-          echo "Pushed: ${IMAGE}:${STEVE_REF} and ${IMAGE}:${STEVE_REF}-java25"
+          echo "Pushed: ${IMAGE}:${STEVE_REF}"
           echo "Digest to pin:"
-          docker inspect --format '{{ index .RepoDigests 0 }}' "${IMAGE}:${STEVE_REF}-java25"
+          docker inspect --format '{{ index .RepoDigests 0 }}' "${IMAGE}:${STEVE_REF}"
 
       - name: Cleanup
         if: always()

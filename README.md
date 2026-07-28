@@ -29,37 +29,39 @@ cannot drift apart.
 
 ## Tags
 
-| Tag | Contents |
-| --- | --- |
-| `steve-<X.Y.Z>` | SteVe release `steve-X.Y.Z` on the currently recommended JRE |
-| `steve-<X.Y.Z>-java25` | The same, with the JRE major pinned |
+One tag per upstream release: `steve-<X.Y.Z>` names SteVe release
+`steve-X.Y.Z`. There is deliberately no `latest` and no per-commit tag.
 
-Both tags name the same image for a given release. The plain tag follows the
-recommended JRE and will move if that changes; the suffixed one never does.
+The image currently runs on **Eclipse Temurin 25 (JRE)** — a build detail, not
+part of the tag. A JRE update republishes the same tag with a new digest.
 
-**If you pin by digest — and you should — use the plain tag.** The digest is what
-Docker actually resolves, so the tag alongside it is documentation: a moving tag
-cannot change what you run. Meanwhile the suffixed tag stops being republished at
-the next JRE bump, which leaves version-tracking tools stranded on a dead tag with
-no signal. Reach for the suffixed tag only if you track tags *without* a digest
-and a JRE major bump would break you.
+**Pin by digest — and you should.** The digest is what Docker actually resolves,
+so the tag alongside it is documentation: a moving tag cannot change what you
+run, and it keeps version-tracking tools pointed at something still being
+republished.
 
-There is deliberately no `latest` and no per-commit tag.
-
-**Pin by digest in production.** Tags are convenient; digests are immutable:
+> `steve-3.13.0-java25` was published once, before the JRE was dropped from the
+> tag scheme. It is frozen at that build and is no longer produced, documented
+> or scanned — move to `steve-3.13.0`.
 
 ```bash
-docker buildx imagetools inspect ghcr.io/juherr/steve:steve-3.13.0-java25
+docker buildx imagetools inspect ghcr.io/juherr/steve:steve-3.13.0
 ```
 
 ```yaml
-image: ghcr.io/juherr/steve:steve-3.13.0-java25@sha256:<digest>
+image: ghcr.io/juherr/steve:steve-3.13.0@sha256:<digest>
+```
+
+The exact JRE of an image you already hold is readable from it:
+
+```bash
+docker run --rm --entrypoint java ghcr.io/juherr/steve:steve-3.13.0 -version
 ```
 
 ## Usage
 
 ```bash
-docker pull ghcr.io/juherr/steve:steve-3.13.0-java25
+docker pull ghcr.io/juherr/steve:steve-3.13.0
 ```
 
 Minimal Compose setup:
@@ -67,7 +69,7 @@ Minimal Compose setup:
 ```yaml
 services:
   steve:
-    image: ghcr.io/juherr/steve:steve-3.13.0-java25
+    image: ghcr.io/juherr/steve:steve-3.13.0
     restart: unless-stopped
     depends_on:
       steve-db:
@@ -173,10 +175,15 @@ docker build \
   --network=host \
   --build-arg STEVE_REF=steve-3.13.0 \
   --build-arg DB_IP=127.0.0.1 \
+  --build-arg BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  --build-arg VCS_REF="$(git rev-parse HEAD)" \
   -t steve:local .
 
 docker rm -f steve-build-db
 ```
+
+`BUILD_DATE` and `VCS_REF` stamp the `org.opencontainers.image.created` and
+`.revision` labels; omit them and those two labels come out empty.
 
 `--network=host` is what lets the `RUN` steps reach the database on
 `127.0.0.1`. BuildKit only accepts `host`, `none` or `default` for `--network`,
@@ -188,6 +195,15 @@ one has been deprecated since Docker Engine 23.
 The `Build SteVe image` workflow (`workflow_dispatch`) takes a `steve_ref` input
 such as `steve-3.13.0`, builds on a GitHub-hosted runner and pushes to GHCR. It
 prints the resulting digest at the end, ready to pin.
+
+The same workflow runs on pull requests, everything but the push: a change to
+the packaging is proven to build before it can be merged.
+
+Separately, every published `steve-X.Y.Z` tag is re-scanned weekly with
+[Trivy](https://trivy.dev) and the results land in the repository's *Security*
+tab. Scanning on a schedule rather than at build time is deliberate: an image is
+clean the day it is built, and what you need to know is whether the tag you
+pinned has drifted since.
 
 ## Third-party licenses
 
