@@ -188,21 +188,34 @@ one has been deprecated since Docker Engine 23.
 
 ## Releasing
 
-Publishing is a deliberate act. The `Build SteVe image` workflow is run by hand
-(`workflow_dispatch`), takes a `steve_ref` input such as `steve-3.13.0`, builds
-on a GitHub-hosted runner and pushes to GHCR, printing the resulting digest at
-the end, ready to pin.
+Publishing is a push to the `release` branch:
+
+```bash
+git push origin main:release
+```
+
+That builds on a GitHub-hosted runner and pushes to GHCR, printing the resulting
+digest at the end, ready to pin. The version built is whatever `ARG STEVE_REF`
+says in the `Dockerfile` on that commit — the single place the release is pinned
+in code.
 
 Merging to `main` does **not** publish. "The packaging changed" and "a release
 should go out" are different events, and tying them together moved the release
 tag whenever a comment did. What merging does is run the same workflow on the
 pull request, everything but the push, so a change is proven to build before it
-lands.
+lands. And because shipping is a branch rather than a button, what is waiting to
+go out is a plain git question:
 
-The trade is that a merged change can sit unreleased. A `Release drift` workflow
-covers that: on every push to `main`, and again weekly, it compares the
+```bash
+git log release..main -- Dockerfile .dockerignore entrypoint.sh flyway-callbacks
+```
+
+A `Release drift` workflow covers what git cannot answer: whether a push to
+`release` actually produced an image. It compares the
 `org.opencontainers.image.revision` label of the published tag against the
-packaging files on `main`, and warns when they have parted company.
+packaging on `release`, and warns when they diverge — a build that failed after
+the branch moved would otherwise leave the branch claiming a release that never
+landed.
 
 Separately, every published `steve-X.Y.Z` tag is re-scanned weekly with
 [Trivy](https://trivy.dev) and the results land in the repository's *Security*

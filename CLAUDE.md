@@ -63,13 +63,12 @@ Use the native file and search tools.
 
 ## Scope
 
-Merging no longer publishes — the build workflow pushes only from
-`workflow_dispatch`. So pushing a branch and opening a PR is safe, and **running
-the `Build SteVe image` workflow is the release**. Never dispatch it without
-being asked: it overwrites `ghcr.io/juherr/steve:steve-X.Y.Z` for every
-consumer.
+Merging no longer publishes. Pushing a branch and opening a PR is safe;
+**`git push origin main:release` is the release** and overwrites
+`ghcr.io/juherr/steve:steve-X.Y.Z` for every consumer. Never push that branch
+unless asked for a release in so many words — "merge this" is not that.
 
 After merging anything under `Dockerfile`, `.dockerignore`, `entrypoint.sh` or
-`flyway-callbacks/`, say plainly that the change is merged but not published,
-and that a dispatch is needed to ship it. `release-drift.yml` will say the same
-thing, but a week later at the earliest.
+`flyway-callbacks/`, say plainly that the change is merged but not shipped, and
+what would ship it. Do not let it pass silently: `release-drift.yml` reports it
+too, but only as a step-summary note.

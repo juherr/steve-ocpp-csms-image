@@ -64,14 +64,12 @@ updates. A comment adjacent to the pin is not enough — check that
 silently freezes. `customManagers[1]` deliberately matches every workflow, so a
 linter or scanner added later is managed on arrival.
 
-The SteVe release is the one version Renovate cannot fully own. It appears in
-`ARG STEVE_REF` (`Dockerfile`) and in the `workflow_dispatch` `default:`
-(workflow) — both managed, landing in one PR — plus the examples in `README.md`,
-which are prose and must be edited by hand. The `Dockerfile` is the source the
-pull-request build reads when there is no dispatch input, so the two cannot
-silently disagree about what a branch would ship. The JRE major is a third
-hand-edited mention: `README.md` names it under **Tags**, so an
-`eclipse-temurin` bump has to update that sentence too.
+The SteVe release is pinned in exactly one place in code: `ARG STEVE_REF` in the
+`Dockerfile`. Both the pull-request build and the release read it from there, so
+the version a branch would ship and the version its build tests cannot disagree.
+The examples in `README.md` are prose and must be edited by hand, as is the JRE
+major, which `README.md` names under **Tags** — an `eclipse-temurin` bump has to
+update that sentence too.
 
 **Update `NOTICE` when the image composition changes.** The repository files are
 Apache-2.0, but the produced image aggregates SteVe (GPL-3.0-or-later), the
@@ -104,12 +102,18 @@ or swapping a component changes the obligations.
   idempotent — it is not redundant work.
 - **`curl` is installed in the runtime stage** on purpose: the documented
   Compose healthcheck shells out to it, and CI asserts it is present.
-- **Merging does not publish.** The build workflow pushes only from
-  `workflow_dispatch`. Restoring a `push:` trigger would republish `steve-X.Y.Z`
-  under a new digest for a comment fixed in the `Dockerfile` — that is what it
-  used to do. `release-drift.yml` is the safety net for the opposite failure,
-  a packaging change merged and never released; do not remove one without the
-  other.
+- **Merging does not publish; pushing `release` does.** `git push origin
+  main:release` is the release. The publish steps are guarded on
+  `github.ref_name == 'release'`, so no other branch and no dispatch from
+  elsewhere can ship. Restoring a `push:` trigger on `main` would republish
+  `steve-X.Y.Z` under a new digest for a comment fixed in the `Dockerfile` —
+  that is what it used to do.
+- **`release-drift.yml` answers the one question git cannot.** The branch
+  records what was *meant* to ship; the registry label records what actually
+  did. A build that fails after `release` moved leaves the branch claiming a
+  release that never landed, and `git log release..main` would then say
+  "nothing pending" — a silent wrong answer. Do not delete this workflow on the
+  grounds that the branch already tells you.
 - **Trivy runs weekly on the published tags, not during the build.** An image is
   clean the day it is built and says nothing about the day after; the question
   worth answering is whether a *published* tag has drifted. It is report-only

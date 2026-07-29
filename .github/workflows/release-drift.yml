@@ -1,23 +1,23 @@
 ---
-# Is the published image still the packaging that `main` describes?
+# Does the published image match what `release` says was shipped?
 #
-# Publishing is a deliberate act — the build workflow only pushes from
-# workflow_dispatch — which trades an automatic release for one that can be
-# forgotten. This is the counterweight. It reads the
-# org.opencontainers.image.revision label off the newest published tag and asks
-# whether any packaging file has changed on `main` since that commit.
+# Publishing is a push to `release`, so git already answers "what is waiting to
+# go out" — `git log release..main`, offline, instantly. Git cannot answer the
+# other question: whether the push actually produced an image. A build that
+# fails after `release` has moved leaves the branch claiming a release that
+# never landed, and the next person to diff the branches sees nothing pending
+# and believes the image is current. Only the registry knows, and it is the one
+# source that cannot lie about it.
 #
-# It never fails the build. An unreleased packaging change is a legitimate
-# state, sometimes for days; a red `main` for it would be crying wolf and would
-# be muted within a week. It warns instead — on the merge that introduced the
-# drift, and again every Monday for as long as it lasts.
+# So this reads org.opencontainers.image.revision off the newest published tag
+# and compares it with `release`. `main` being ahead of `release` is reported
+# too, but as information, not a warning: an unreleased change is a deliberate
+# state, and warning about it would be crying wolf at the normal case.
 #
-# The comparison is scoped to the files whose content ends up in the image.
-# Notably it ignores this repository's workflows, including the build one — an
-# edit there *can* change the produced image (a new build-arg would), but most
-# are orchestration, and a warning that fires on every workflow tweak is a
-# warning that gets ignored within a month. That case is left to the human
-# reviewing the change, who is the one dispatching the release anyway.
+# The comparison is scoped to the files whose content ends up in the image. It
+# ignores this repository's own workflows: an edit there *can* change the built
+# image (a new build-arg would), but most are orchestration, and a warning that
+# fires on every workflow tweak stops being read within a month.
 
 name: Release drift
 
@@ -25,6 +25,7 @@ on:
   push:
     branches:
       - main
+      - release
   schedule:
     # Mondays, 06:31 UTC — after the published-image scan, same reasoning about
     # off-the-hour runner queues.
@@ -43,19 +44,20 @@ env:
 
 jobs:
   drift:
-    name: published vs main
+    name: published vs release
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      # Full history: the comparison walks from the published commit to HEAD,
-      # and that commit can be many merges back.
+      # Full history and every branch: the comparison walks from the published
+      # commit to `release`, and that commit can be many merges back.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
 
-      - name: Compare the published image with the packaging on main
+      - name: Compare the published image with the release branch
         run: |
           set -euo pipefail
+          git fetch --quiet --prune origin '+refs/heads/*:refs/remotes/origin/*'
 
           token=$(curl -fsS \
             "https://ghcr.io/token?scope=repository:${REGISTRY_REPO}:pull&service=ghcr.io" \
@@ -82,25 +84,50 @@ jobs:
             exit 0
           fi
 
-          # Only the files that reach the image. A README or workflow edit is
-          # not a reason to republish.
-          ahead=$(git rev-list --count "${published}..HEAD" -- \
-            Dockerfile .dockerignore entrypoint.sh flyway-callbacks)
+          # The files whose content reaches the image, as an array: relying on
+          # word splitting here would be a silent trap, and this script is meant
+          # to be runnable by hand under any shell.
+          paths=(Dockerfile .dockerignore entrypoint.sh flyway-callbacks)
 
-          if [ "${ahead}" -eq 0 ]; then
-            echo "In sync: no packaging change since ${tag} was built (${published})."
-            exit 0
+          # Before the release branch exists, fall back to main so this workflow
+          # is useful from the first run rather than silently inert.
+          if git rev-parse --verify --quiet origin/release >/dev/null; then
+            shipped="origin/release"
+          else
+            shipped="origin/main"
+            echo "::notice::No \`release\` branch yet — comparing against main."
           fi
 
-          echo "::warning::${tag} was built from ${published}; ${ahead} packaging commit(s) have landed on main since. Run the \"Build SteVe image\" workflow to publish them."
-          {
-            echo "### Published image is behind \`main\`"
-            echo
-            echo "\`${tag}\` was built from \`${published}\`."
-            echo "\`main\` is at \`$(git rev-parse HEAD)\`, with **${ahead}** packaging commit(s) since:"
-            echo
-            git log --format='- %h %s' "${published}..HEAD" -- \
-              Dockerfile .dockerignore entrypoint.sh flyway-callbacks
-            echo
-            echo "Publish with the **Build SteVe image** workflow (\`workflow_dispatch\`)."
-          } >> "${GITHUB_STEP_SUMMARY}"
+          # Compare the trees, not the commit count. It answers the question
+          # being asked — does the published image's packaging differ from what
+          # was meant to ship — and it stays right when a change is made and
+          # reverted, where counting commits would report two and mean nothing.
+          if git diff --quiet "${published}" "${shipped}" -- "${paths[@]}"; then
+            echo "In sync: ${tag} was built from ${published}, whose packaging is ${shipped}'s."
+          else
+            echo "::warning::The packaging on ${shipped} and that of the published ${tag} (built from ${published}) have diverged. Usually a publish that did not land; also possible if the release branch moved backwards. Re-run \"Build SteVe image\" from the release branch."
+            {
+              echo "### Published image does not match \`${shipped}\`"
+              echo
+              echo "\`${tag}\` was built from \`${published}\`, and its packaging differs from \`${shipped}\`:"
+              echo
+              echo '```'
+              git diff --stat "${published}" "${shipped}" -- "${paths[@]}"
+              echo '```'
+              git log --format='- %h %s' "${published}..${shipped}" -- "${paths[@]}"
+            } >> "${GITHUB_STEP_SUMMARY}"
+          fi
+
+          # Informational only. main ahead of release is the normal state
+          # between a merge and the release that ships it.
+          if [ "${shipped}" = "origin/release" ] \
+             && ! git diff --quiet origin/release origin/main -- "${paths[@]}"; then
+            {
+              echo "### Packaging changes waiting on \`main\`"
+              echo
+              git log --format='- %h %s' origin/release..origin/main -- "${paths[@]}"
+              echo
+              echo "Ship them with \`git push origin main:release\`."
+            } >> "${GITHUB_STEP_SUMMARY}"
+            echo "Packaging changes are waiting on main — normal between a merge and the release that ships them."
+          fi

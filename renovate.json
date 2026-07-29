@@ -18,14 +18,12 @@
   "customManagers": [
     {
       "customType": "regex",
-      "description": "SteVe release tag — the Dockerfile ARG and the release workflow's dispatch default must move together, so both are declared with the same depName and land in a single PR",
+      "description": "SteVe release tag — pinned in exactly one place, the Dockerfile ARG that both the release build and the pull-request build read",
       "managerFilePatterns": [
-        "/^Dockerfile$/",
-        "/^\\.github/workflows/build-image\\.yml$/"
+        "/^Dockerfile$/"
       ],
       "matchStrings": [
-        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\s+ARG STEVE_REF=(?<currentValue>\\S+)",
-        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\s+default: \"(?<currentValue>[^\"]+)\""
+        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\s+ARG STEVE_REF=(?<currentValue>\\S+)"
       ],
       "versioningTemplate": "regex:^steve-(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)$"
     },

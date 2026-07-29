@@ -21,23 +21,27 @@
 name: Build SteVe image
 
 on:
-  workflow_dispatch:
-    inputs:
-      steve_ref:
-        description: "SteVe release tag to build (e.g. steve-3.13.0)"
-        required: true
-        # renovate: datasource=github-releases depName=steve-community/steve
-        default: "steve-3.13.0"
-  # No `push:` trigger. Publishing used to happen on every merge touching the
-  # packaging, which conflated two different events: "the packaging changed" and
-  # "a release should go out". A typo fixed in a comment here republished
-  # steve-X.Y.Z under a new digest, so the tag moved without anything about the
-  # image having changed. Releasing is now the deliberate act above, and
-  # `release-drift.yml` watches for the failure mode that trade introduces —
-  # a packaging change merged and then forgotten.
+  # Publishing is a push to `release`, and nothing else publishes.
   #
-  # Pull requests still run the whole build, minus the login and the push: it is
-  # the only thing standing between an unbuildable change and `main`.
+  # It used to happen on every merge to `main` touching the packaging, which
+  # conflated two different events: "the packaging changed" and "a release
+  # should go out". A typo fixed in a comment republished steve-X.Y.Z under a
+  # new digest — the tag moved while nothing about the image had.
+  #
+  # A branch rather than a button: shipping becomes `git push origin
+  # main:release`, an act with a record, and "what is waiting to ship" is
+  # answerable offline with `git log release..main`. It also removes the last
+  # duplicated pin — with no dispatch input to carry a version, the Dockerfile's
+  # ARG is the only place the release is written in code.
+  push:
+    branches:
+      - release
+  # Re-run a publish without a new commit — a failed run, a registry hiccup.
+  # Select the `release` branch when dispatching; the publish steps below refuse
+  # to run from anywhere else.
+  workflow_dispatch:
+  # Pull requests run the whole build, minus the login and the push: it is the
+  # only thing standing between an unbuildable change and `main`.
   pull_request:
     paths:
       - "Dockerfile"
@@ -72,25 +76,17 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      # The tag comes from user input and is interpolated into shell commands
-      # below, so validate it against a strict format BEFORE any use. The
-      # validation also covers the pull-request path, where the value is read
-      # out of the Dockerfile rather than typed.
+      # The release comes from the Dockerfile's own ARG — the single place it is
+      # pinned in code, so the version a branch would ship and the version its
+      # build tests cannot disagree. Validated against a strict format before it
+      # reaches any shell command below.
       - name: Resolve and validate the SteVe tag
         id: ref
-        env:
-          INPUT_REF: ${{ inputs.steve_ref }}
         run: |
           set -euo pipefail
-          ref="${INPUT_REF:-}"
-          if [ -z "$ref" ]; then
-            # Pull request: no input to read. Take the Dockerfile's own default
-            # rather than keeping a second copy of the release here — it is the
-            # version this branch would actually ship.
-            ref=$(sed -n 's/^ARG STEVE_REF=//p' Dockerfile | head -1)
-          fi
+          ref=$(sed -n 's/^ARG STEVE_REF=//p' Dockerfile | head -1)
           if ! printf '%s' "$ref" | grep -Eq '^steve-[0-9]+\.[0-9]+\.[0-9]+$'; then
-            echo "Invalid SteVe tag: '$ref' (expected steve-X.Y.Z)"; exit 1
+            echo "Invalid ARG STEVE_REF in Dockerfile: '$ref' (expected steve-X.Y.Z)"; exit 1
           fi
           echo "steve_ref=$ref" >> "$GITHUB_OUTPUT"
 
@@ -155,7 +151,7 @@ jobs:
           docker run --rm --entrypoint curl "${IMAGE}:${STEVE_REF}" --version >/dev/null
 
       - name: Login to GHCR
-        if: github.event_name == 'workflow_dispatch'
+        if: github.ref_name == 'release'
         env:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GHCR_USER: ${{ github.actor }}
@@ -168,7 +164,7 @@ jobs:
       # No `latest`, and no `sha-${GITHUB_SHA}` tag: the latter WOULD add a
       # stored version per build, for no benefit — consumers pin by digest.
       - name: Push
-        if: github.event_name == 'workflow_dispatch'
+        if: github.ref_name == 'release'
         env:
           STEVE_REF: ${{ steps.ref.outputs.steve_ref }}
         run: |
