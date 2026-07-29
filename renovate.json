@@ -13,6 +13,13 @@
       ],
       "allowedVersions": "<12",
       "description": "Stay on the MariaDB LTS track for the throwaway build database, matching what most SteVe deployments actually run"
+    },
+    {
+      "matchDepNames": [
+        "steve-community/steve"
+      ],
+      "versioning": "regex:^steve-(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)$",
+      "description": "Upstream prefixes its release tags. Declared once here rather than per manager: the Dockerfile pin and the documentation examples are extracted separately but describe the same tag format"
     }
   ],
   "customManagers": [
@@ -24,8 +31,7 @@
       ],
       "matchStrings": [
         "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\s+ARG STEVE_REF=(?<currentValue>\\S+)"
-      ],
-      "versioningTemplate": "regex:^steve-(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)$"
+      ]
     },
     {
       "customType": "regex",
@@ -37,6 +43,18 @@
         "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\s+\\w+_IMAGE: \"[^\"\\s:]+:(?<currentValue>[^\"\\s]+)\""
       ],
       "versioningTemplate": "docker"
+    },
+    {
+      "customType": "regex",
+      "description": "SteVe release tag in the Markdown documentation — same depName as the Dockerfile pin, so the examples move in the same PR instead of freezing silently. Prose has no adjacent `# renovate:` comment to read, hence the templates; every .md file, so a document added later is managed on arrival",
+      "managerFilePatterns": [
+        "/\\.md$/"
+      ],
+      "matchStrings": [
+        "(?:ghcr\\.io/juherr/steve:|STEVE_REF=|manifests/)(?<currentValue>steve-\\d+\\.\\d+\\.\\d+)"
+      ],
+      "datasourceTemplate": "github-releases",
+      "depNameTemplate": "steve-community/steve"
     }
   ]
 }

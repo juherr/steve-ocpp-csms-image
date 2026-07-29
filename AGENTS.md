@@ -62,15 +62,23 @@ before the `USER` instruction.
 by tag, GitHub Actions by commit SHA, and `# renovate:` comments drive the
 updates. A comment adjacent to the pin is not enough — check that
 `renovate.json` actually covers the file, otherwise the pin looks maintained and
-silently freezes. `customManagers[1]` deliberately matches every workflow, so a
-linter or scanner added later is managed on arrival.
+silently freezes. `customManagers[1]` deliberately matches every workflow and
+`customManagers[2]` every Markdown file, so a linter, scanner or document added
+later is managed on arrival.
 
 The SteVe release is pinned in exactly one place in code: `ARG STEVE_REF` in the
 `Dockerfile`. Both the pull-request build and the release read it from there, so
 the version a branch would ship and the version its build tests cannot disagree.
-The examples in `README.md` are prose and must be edited by hand, as is the JRE
-major, which `README.md` names under **Tags** — an `eclipse-temurin` bump has to
-update that sentence too.
+The examples in `README.md`, this file and `CLAUDE.md` are managed too and land
+in the same PR — prose has no `# renovate:` comment to hang off, so they are
+matched on the literal `ghcr.io/juherr/steve:`, `STEVE_REF=` and `manifests/`
+forms. Keep those shapes when editing an example, or it leaves Renovate's reach;
+illustrations naming no real tag say `steve-X.Y.Z` and are matched by nothing,
+deliberately.
+
+The JRE major is the one version mention Renovate does not own: `README.md`
+names it under **Tags**, so an `eclipse-temurin` bump has to update that
+sentence by hand.
 
 **Update `NOTICE` when the image composition changes.** The repository files are
 Apache-2.0, but the produced image aggregates SteVe (GPL-3.0-or-later), the
@@ -157,6 +165,23 @@ prefer arrays to space-separated strings when a command takes a path list.
 The linters are the cheap gate. Run the three steps of
 `.github/workflows/lint.yml` — that file pins the images, so copying the
 commands here would only create a second version to keep in sync.
+
+A change to a pin — or to a file holding one — is proven by making Renovate say
+so, not by reading `renovate.json`. `--platform=local` runs on the working
+directory, and `--dry-run=extract` stops after the extraction phase: no
+datasource queried, no branch, no PR, nothing written.
+
+```bash
+LOG_LEVEL=debug npx --yes renovate --platform=local --dry-run=extract \
+  | grep -E '"(packageFile|replaceString)"'
+```
+
+Every pin must appear as a `replaceString` under its `packageFile`; a pin that
+is missing there is unmanaged, whatever the comment next to it says. Drop
+`--dry-run=extract` and `--platform=local` falls back to its `dryRun=lookup`
+default, which also queries the datasources and says which version each pin
+would move to — that one hits github.com, so prefix it with
+`RENOVATE_GITHUB_COM_TOKEN="$(gh auth token)"` to stay out of the rate limit.
 
 Build locally with the block under **Building locally** in `README.md`. It is
 one copy of those commands on purpose: the README claims they are exactly what
