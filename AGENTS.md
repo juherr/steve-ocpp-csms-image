@@ -22,7 +22,8 @@ this repository — if something must change in SteVe, it changes upstream.
 | `.github/workflows/build-image.yml` | Build & push to GHCR — see its `on:` block for the triggers |
 | `.github/workflows/lint.yml` | hadolint / shellcheck / actionlint |
 | `.github/workflows/scan-published.yml` | Weekly Trivy scan of the tags already on GHCR |
-| `.github/workflows/release-drift.yml` | Warns when `main`'s packaging is ahead of the published image |
+| `.github/workflows/release-drift.yml` | Schedules `hack/release-drift.sh` — see that script for what it compares |
+| `hack/release-drift.sh` | Published image vs the `release` branch; runnable by hand |
 | `README.md` | User-facing documentation |
 | `NOTICE` | License aggregation of the produced image — must stay accurate |
 | `renovate.json` | Dependency pinning automation |
@@ -144,6 +145,14 @@ endpoint's scope, not a general tier difference, which is the point: check the
 specific permission instead of assuming a tier in either direction. The `gh` and
 `curl` recipes in `CLAUDE.md` inspect what is already published, and there your
 own credentials are the right ones.
+
+The same asymmetry catches the **shell**. CI runs `bash`; an interactive macOS
+terminal is usually `zsh`, which does not word-split unquoted variables. A check
+retyped from `release-drift.yml` into a zsh prompt once passed while filtering
+on a single path that does not exist, reporting "in sync" when the trees
+differed. Two habits close it: run scripts through their shebang rather than
+pasting their contents (`./hack/release-drift.sh`, not a copy of its body), and
+prefer arrays to space-separated strings when a command takes a path list.
 
 The linters are the cheap gate. Run the three steps of
 `.github/workflows/lint.yml` — that file pins the images, so copying the
