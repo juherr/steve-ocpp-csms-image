@@ -116,6 +116,18 @@ or swapping a component changes the obligations.
 
 ## Verifying a change
 
+**A check that passes with your own `gh` credentials proves nothing about CI.**
+A personal token carries `repo` and `read:packages`; the workflow's
+`GITHUB_TOKEN` carries neither. This bit once already: the tag discovery in
+`scan-published.yml` was "verified" against
+`/users/juherr/packages/container/steve/versions`, an endpoint scoped to the
+*user*, which `GITHUB_TOKEN` cannot read. Prefer a path that needs no auth at
+all — the GHCR registry API answers the same question anonymously because the
+package is public, and it has no pagination trap either.
+
+The same asymmetry applies to `docker`: locally you are root on the daemon and
+have your own registry logins, the runner has neither.
+
 The linters are the cheap gate. Run the three steps of
 `.github/workflows/lint.yml` — that file pins the images, so copying the
 commands here would only create a second version to keep in sync.
