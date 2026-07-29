@@ -116,17 +116,21 @@ or swapping a component changes the obligations.
 
 ## Verifying a change
 
-**A check that passes with your own `gh` credentials proves nothing about CI.**
-A personal token carries `repo` and `read:packages`; the workflow's
-`GITHUB_TOKEN` carries neither. This bit once already: the tag discovery in
-`scan-published.yml` was "verified" against
-`/users/juherr/packages/container/steve/versions`, an endpoint scoped to the
-*user*, which `GITHUB_TOKEN` cannot read. Prefer a path that needs no auth at
-all — the GHCR registry API answers the same question anonymously because the
-package is public, and it has no pagination trap either.
+**Check with the credentials the target will have, not the ones you happen to
+hold.** `scan-published.yml` discovers its tags from the GHCR registry rather
+than from `/users/juherr/packages/container/steve/versions`, because that REST
+endpoint is scoped to the user account. It was once "verified" locally with a
+personal token that happened to carry `read:packages` — which said nothing about
+the workflow, whose `GITHUB_TOKEN` is issued for the repository. The registry
+answers the same question with no credentials at all, the package being public,
+so the question stops arising; it has no pagination trap either.
 
-The same asymmetry applies to `docker`: locally you are root on the daemon and
-have your own registry logins, the runner has neither.
+Keep that narrow. `GITHUB_TOKEN` reaches GHCR perfectly well — `build-image.yml`
+logs in with it and pushes — and the runner has Docker. The gap was one REST
+endpoint's scope, not a general tier difference, which is the point: check the
+specific permission instead of assuming a tier in either direction. The `gh` and
+`curl` recipes in `CLAUDE.md` inspect what is already published, and there your
+own credentials are the right ones.
 
 The linters are the cheap gate. Run the three steps of
 `.github/workflows/lint.yml` — that file pins the images, so copying the
