@@ -27,6 +27,7 @@ this repository — if something must change in SteVe, it changes upstream.
 | `hack/release-drift.sh` | Published image vs the `release` branch; runnable by hand |
 | `hack/release-preflight.sh` | Would releasing HEAD publish anything, or only move a digest; runnable by hand |
 | `README.md` | User-facing documentation |
+| `.github/assets/` | Images referenced by `README.md`; outside the build context |
 | `NOTICE` | License aggregation of the produced image — must stay accurate |
 | `renovate.json` | Dependency pinning automation |
 

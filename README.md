@@ -242,3 +242,7 @@ built from an unmodified upstream tag), the Flyway CLI Open Source Edition
 
 See [NOTICE](NOTICE) for the full breakdown and for how the GPLv3 corresponding
 source requirement is met.
+
+---
+
+<a href="https://juherr.dev"><img src=".github/assets/juherr-dev.png" alt="" width="18" height="18" align="middle"> <sub>A project by <b>juherr.dev</b> ↗</sub></a>
