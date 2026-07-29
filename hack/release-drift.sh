@@ -41,17 +41,30 @@ warn() { if in_ci; then printf '::warning::%s\n' "$1"; else printf 'WARNING: %s\
 notice() { if in_ci; then printf '::notice::%s\n' "$1"; else printf 'NOTE: %s\n' "$1"; fi; }
 summary() { cat >>"${GITHUB_STEP_SUMMARY:-/dev/stdout}"; }
 
-git fetch --quiet --prune origin '+refs/heads/*:refs/remotes/origin/*'
+# Operational failures — no route to the remote, GHCR down or rate-limiting, a
+# response that is not the JSON we expect — say nothing about whether a release
+# landed. `set -e` would turn each of them into a failed step, which is a red X
+# on `main` for someone else's outage, and a check that goes red for reasons
+# outside the repository is a check people learn to scroll past. Warn and stop:
+# the contract at the top of this file is "reports, does not gate".
+bail() { warn "$1"; exit 0; }
+usable() { [ -n "$1" ] && [ "$1" != "null" ]; }
+
+git fetch --quiet --prune origin '+refs/heads/*:refs/remotes/origin/*' \
+  || bail "Could not fetch from origin — skipping the drift check."
 
 token=$(curl -fsS \
   "https://ghcr.io/token?scope=repository:${REGISTRY_REPO}:pull&service=ghcr.io" \
-  | jq -r .token)
+  | jq -r .token) \
+  || bail "Could not obtain a pull token from GHCR for ${REGISTRY_REPO} — skipping the drift check."
+usable "${token}" || bail "GHCR returned no pull token for ${REGISTRY_REPO} — skipping the drift check."
 
 tag=$(curl -fsS -H "Authorization: Bearer ${token}" \
   "https://ghcr.io/v2/${REGISTRY_REPO}/tags/list?n=1000" \
   | jq -r '[(.tags // [])[] | select(test("^steve-[0-9]+\\.[0-9]+\\.[0-9]+$"))]
            | sort_by(ltrimstr("steve-") | split(".") | map(tonumber))
-           | last // empty')
+           | last // empty') \
+  || bail "Could not list the tags of ${REGISTRY_REPO} — skipping the drift check."
 if [ -z "${tag}" ]; then
   echo "Nothing published yet — nothing to compare."
   exit 0
@@ -59,10 +72,14 @@ fi
 
 config=$(curl -fsS -H "Authorization: Bearer ${token}" \
   -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \
-  "https://ghcr.io/v2/${REGISTRY_REPO}/manifests/${tag}" | jq -r .config.digest)
+  "https://ghcr.io/v2/${REGISTRY_REPO}/manifests/${tag}" | jq -r .config.digest) \
+  || bail "Could not read the manifest of ${tag} — skipping the drift check."
+usable "${config}" || bail "The manifest of ${tag} carries no config digest — skipping the drift check."
+
 published=$(curl -fsSL -H "Authorization: Bearer ${token}" \
   "https://ghcr.io/v2/${REGISTRY_REPO}/blobs/${config}" \
-  | jq -r '.config.Labels["org.opencontainers.image.revision"] // empty')
+  | jq -r '.config.Labels["org.opencontainers.image.revision"] // empty') \
+  || bail "Could not read the image config of ${tag} — skipping the drift check."
 
 if [ -z "${published}" ] || ! git cat-file -e "${published}^{commit}" 2>/dev/null; then
   warn "${tag} carries revision '${published}', which is not a commit in this repository — it predates the current history, or was built elsewhere. Cannot compare."
