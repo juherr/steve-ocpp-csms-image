@@ -1,9 +1,8 @@
-# The build context is the repository root, but only three paths are ever
-# COPYed (entrypoint.sh, flyway-callbacks/, and nothing else). Keep the context
-# small and make sure repository metadata can never end up in the image.
-.git
-.github
-*.md
-LICENSE
-NOTICE
-renovate.json
+# The build context is the repository root, but the Dockerfile only ever COPYs
+# entrypoint.sh and flyway-callbacks/. Stated as an allowlist rather than a list
+# of things to exclude: a denylist has to grow with every new file at the root
+# — a linter config, an agent's scratch directory — and nothing signals when one
+# is forgotten, whereas anything missing from this list fails the COPY loudly.
+*
+!entrypoint.sh
+!flyway-callbacks

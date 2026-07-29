@@ -1,0 +1,53 @@
+---
+# Static checks — no Docker build, no registry, no database. Seconds, not
+# minutes, so this runs on every pull request whatever it touches (unlike the
+# image build, which is path-filtered).
+#
+# The linters run from their own pinned images instead of third-party actions:
+# one less thing to pin by SHA, and the exact command below is runnable locally.
+
+name: Lint
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lint-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # renovate: datasource=docker depName=hadolint/hadolint
+  HADOLINT_IMAGE: "hadolint/hadolint:v2.14.0-alpine"
+  # renovate: datasource=docker depName=rhysd/actionlint
+  ACTIONLINT_IMAGE: "rhysd/actionlint:1.7.12"
+
+jobs:
+  lint:
+    name: Dockerfile, shell & workflows
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      # Every linter below discovers its own inputs, so a second Dockerfile or a
+      # second script cannot be added without being checked. The rules waived
+      # for the Dockerfile are `# hadolint ignore=` comments on the instructions
+      # that earned the waiver, not a repo-wide config.
+      - name: hadolint (Dockerfiles)
+        run: |
+          git ls-files '*Dockerfile*' \
+            | xargs -r docker run --rm -v "${PWD}:/repo" -w /repo "${HADOLINT_IMAGE}" hadolint
+
+      # shellcheck ships with the GitHub-hosted runner image.
+      - name: shellcheck (shell scripts)
+        run: git ls-files '*.sh' | xargs -r shellcheck
+
+      - name: actionlint (workflows)
+        run: |
+          docker run --rm -v "${PWD}:/repo" -w /repo "${ACTIONLINT_IMAGE}" -color

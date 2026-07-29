@@ -25,15 +25,16 @@
       ],
       "matchStrings": [
         "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\s+ARG STEVE_REF=(?<currentValue>\\S+)",
-        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\s+DEFAULT_STEVE_REF: \"(?<currentValue>[^\"]+)\""
+        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\s+DEFAULT_STEVE_REF: \"(?<currentValue>[^\"]+)\"",
+        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\s+default: \"(?<currentValue>[^\"]+)\""
       ],
       "versioningTemplate": "regex:^steve-(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)$"
     },
     {
       "customType": "regex",
-      "description": "Docker images referenced from the build workflow rather than from a FROM line",
+      "description": "Docker images referenced from a workflow env block rather than from a FROM line — every workflow, so that a linter or scanner added later is managed on arrival rather than frozen at the version it was introduced with",
       "managerFilePatterns": [
-        "/^\\.github/workflows/build-image\\.yml$/"
+        "/^\\.github/workflows/.+\\.ya?ml$/"
       ],
       "matchStrings": [
         "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\s+\\w+_IMAGE: \"[^\"\\s:]+:(?<currentValue>[^\"\\s]+)\""

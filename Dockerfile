@@ -33,6 +33,11 @@ ARG DB_IP=mariadb
 
 ENV LANG=C.UTF-8 LC_ALL=C.UTF-8
 
+# DL3008: git is not version-pinned on purpose. Debian drops superseded point
+# releases from its archive, so a pinned `git=1:2.47.2-0.1` turns the build red
+# the day the mirror rotates — for a package that only clones upstream in this
+# throwaway stage and never reaches the runtime image.
+# hadolint ignore=DL3008
 RUN apt-get update \
     && apt-get install -y --no-install-recommends git \
     && rm -rf /var/lib/apt/lists/*
@@ -47,6 +52,11 @@ RUN git clone --depth 1 --branch "${STEVE_REF}" https://github.com/steve-communi
 #             user/password keep the docker defaults: 3306 / stevedb / steve /
 #             changeme).
 # -DskipTests : we only want the .war; code generation runs in generate-sources.
+#
+# DL3059: kept as its own layer, separate from the clone above, so that
+# iterating on the build does not re-clone SteVe. Nothing of this stage reaches
+# the runtime image, so the extra layer costs nothing shipped.
+# hadolint ignore=DL3059
 RUN ./mvnw -B -V -DskipTests -Dmaven.javadoc.skip=true \
     -Pdocker,mariadb -Ddb.ip="${DB_IP}" \
     clean package
@@ -66,6 +76,8 @@ ARG BUILD_DATE=""
 ARG VCS_REF=""
 
 LABEL org.opencontainers.image.source="https://github.com/juherr/steve-ocpp-csms-image"
+LABEL org.opencontainers.image.url="https://github.com/juherr/steve-ocpp-csms-image"
+LABEL org.opencontainers.image.documentation="https://github.com/juherr/steve-ocpp-csms-image#readme"
 LABEL org.opencontainers.image.version="${STEVE_REF}"
 LABEL org.opencontainers.image.created="${BUILD_DATE}"
 LABEL org.opencontainers.image.revision="${VCS_REF}"
@@ -75,6 +87,10 @@ LABEL org.opencontainers.image.description="SteVe OCPP Central System, compiled 
 
 ENV LANG=C.UTF-8 LC_ALL=C.UTF-8
 
+# DL3008: curl is not version-pinned, same reason as the build stage — and here
+# it backs the documented Compose healthcheck, nothing else. A package added to
+# this line later should re-earn the exemption rather than inherit it.
+# hadolint ignore=DL3008
 RUN apt-get update \
     && apt-get install -y --no-install-recommends curl \
     && groupadd --system --gid 10001 steve \
