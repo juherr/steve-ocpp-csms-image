@@ -159,7 +159,8 @@ commands here would only create a second version to keep in sync.
 
 A change to a pin — or to a file holding one — is proven by making Renovate say
 so, not by reading `renovate.json`. `--platform=local` runs on the working
-directory in `dryRun=lookup`: no branch, no PR, nothing written.
+directory, and `--dry-run=extract` stops after the extraction phase: no
+datasource queried, no branch, no PR, nothing written.
 
 ```bash
 LOG_LEVEL=debug npx --yes renovate --platform=local --dry-run=extract \
@@ -168,7 +169,8 @@ LOG_LEVEL=debug npx --yes renovate --platform=local --dry-run=extract \
 
 Every pin must appear as a `replaceString` under its `packageFile`; a pin that
 is missing there is unmanaged, whatever the comment next to it says. Drop
-`--dry-run=extract` to also query the datasources and see which version each pin
+`--dry-run=extract` and `--platform=local` falls back to its `dryRun=lookup`
+default, which also queries the datasources and says which version each pin
 would move to — that one hits github.com, so prefix it with
 `RENOVATE_GITHUB_COM_TOKEN="$(gh auth token)"` to stay out of the rate limit.
 
