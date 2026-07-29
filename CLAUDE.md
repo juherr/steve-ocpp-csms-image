@@ -63,7 +63,13 @@ Use the native file and search tools.
 
 ## Scope
 
-Pushing to `main` publishes to GHCR: the `push` trigger fires on the packaging
-files and overwrites the release tags. Treat any commit touching `Dockerfile`,
-`entrypoint.sh`, `flyway-callbacks/` or the workflow as a release, and confirm
-before pushing.
+Merging no longer publishes — the build workflow pushes only from
+`workflow_dispatch`. So pushing a branch and opening a PR is safe, and **running
+the `Build SteVe image` workflow is the release**. Never dispatch it without
+being asked: it overwrites `ghcr.io/juherr/steve:steve-X.Y.Z` for every
+consumer.
+
+After merging anything under `Dockerfile`, `.dockerignore`, `entrypoint.sh` or
+`flyway-callbacks/`, say plainly that the change is merged but not published,
+and that a dispatch is needed to ship it. `release-drift.yml` will say the same
+thing, but a week later at the earliest.

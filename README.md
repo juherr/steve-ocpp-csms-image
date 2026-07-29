@@ -188,12 +188,21 @@ one has been deprecated since Docker Engine 23.
 
 ## Releasing
 
-The `Build SteVe image` workflow (`workflow_dispatch`) takes a `steve_ref` input
-such as `steve-3.13.0`, builds on a GitHub-hosted runner and pushes to GHCR. It
-prints the resulting digest at the end, ready to pin.
+Publishing is a deliberate act. The `Build SteVe image` workflow is run by hand
+(`workflow_dispatch`), takes a `steve_ref` input such as `steve-3.13.0`, builds
+on a GitHub-hosted runner and pushes to GHCR, printing the resulting digest at
+the end, ready to pin.
 
-The same workflow runs on pull requests, everything but the push: a change to
-the packaging is proven to build before it can be merged.
+Merging to `main` does **not** publish. "The packaging changed" and "a release
+should go out" are different events, and tying them together moved the release
+tag whenever a comment did. What merging does is run the same workflow on the
+pull request, everything but the push, so a change is proven to build before it
+lands.
+
+The trade is that a merged change can sit unreleased. A `Release drift` workflow
+covers that: on every push to `main`, and again weekly, it compares the
+`org.opencontainers.image.revision` label of the published tag against the
+packaging files on `main`, and warns when they have parted company.
 
 Separately, every published `steve-X.Y.Z` tag is re-scanned weekly with
 [Trivy](https://trivy.dev) and the results land in the repository's *Security*

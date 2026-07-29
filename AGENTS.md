@@ -22,6 +22,7 @@ this repository — if something must change in SteVe, it changes upstream.
 | `.github/workflows/build-image.yml` | Build & push to GHCR — see its `on:` block for the triggers |
 | `.github/workflows/lint.yml` | hadolint / shellcheck / actionlint |
 | `.github/workflows/scan-published.yml` | Weekly Trivy scan of the tags already on GHCR |
+| `.github/workflows/release-drift.yml` | Warns when `main`'s packaging is ahead of the published image |
 | `README.md` | User-facing documentation |
 | `NOTICE` | License aggregation of the produced image — must stay accurate |
 | `renovate.json` | Dependency pinning automation |
@@ -64,11 +65,13 @@ silently freezes. `customManagers[1]` deliberately matches every workflow, so a
 linter or scanner added later is managed on arrival.
 
 The SteVe release is the one version Renovate cannot fully own. It appears in
-`ARG STEVE_REF` (`Dockerfile`), in `DEFAULT_STEVE_REF` and the
-`workflow_dispatch` `default:` (workflow) — all three managed and landing in one
-PR — plus the examples in `README.md`, which are prose and must be edited by
-hand. The JRE major is a fourth hand-edited mention: `README.md` names it under
-**Tags**, so a `eclipse-temurin` bump has to update that sentence too.
+`ARG STEVE_REF` (`Dockerfile`) and in the `workflow_dispatch` `default:`
+(workflow) — both managed, landing in one PR — plus the examples in `README.md`,
+which are prose and must be edited by hand. The `Dockerfile` is the source the
+pull-request build reads when there is no dispatch input, so the two cannot
+silently disagree about what a branch would ship. The JRE major is a third
+hand-edited mention: `README.md` names it under **Tags**, so an
+`eclipse-temurin` bump has to update that sentence too.
 
 **Update `NOTICE` when the image composition changes.** The repository files are
 Apache-2.0, but the produced image aggregates SteVe (GPL-3.0-or-later), the
@@ -101,6 +104,12 @@ or swapping a component changes the obligations.
   idempotent — it is not redundant work.
 - **`curl` is installed in the runtime stage** on purpose: the documented
   Compose healthcheck shells out to it, and CI asserts it is present.
+- **Merging does not publish.** The build workflow pushes only from
+  `workflow_dispatch`. Restoring a `push:` trigger would republish `steve-X.Y.Z`
+  under a new digest for a comment fixed in the `Dockerfile` — that is what it
+  used to do. `release-drift.yml` is the safety net for the opposite failure,
+  a packaging change merged and never released; do not remove one without the
+  other.
 - **Trivy runs weekly on the published tags, not during the build.** An image is
   clean the day it is built and says nothing about the day after; the question
   worth answering is whether a *published* tag has drifted. It is report-only

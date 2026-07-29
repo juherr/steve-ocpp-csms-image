@@ -28,23 +28,16 @@ on:
         required: true
         # renovate: datasource=github-releases depName=steve-community/steve
         default: "steve-3.13.0"
-  push:
-    # This trigger publishes the release tag, so keep it on the default branch:
-    # a push on a work branch would otherwise overwrite
-    # ghcr.io/juherr/steve:steve-X.Y.Z with an image built from an unmerged
-    # commit — including its org.opencontainers.image.revision label.
-    branches:
-      - main
-    paths:
-      - "Dockerfile"
-      - ".dockerignore"
-      - "entrypoint.sh"
-      - "flyway-callbacks/**"
-      - ".github/workflows/build-image.yml"
-  # Same job on pull requests, minus the login and the push: merging to main
-  # publishes, so the build has to have been proven before the merge, not after.
-  # Keep the path list identical to the push one above — YAML anchors are not
-  # supported here, so this is a copy that has to be maintained as one.
+  # No `push:` trigger. Publishing used to happen on every merge touching the
+  # packaging, which conflated two different events: "the packaging changed" and
+  # "a release should go out". A typo fixed in a comment here republished
+  # steve-X.Y.Z under a new digest, so the tag moved without anything about the
+  # image having changed. Releasing is now the deliberate act above, and
+  # `release-drift.yml` watches for the failure mode that trade introduces —
+  # a packaging change merged and then forgotten.
+  #
+  # Pull requests still run the whole build, minus the login and the push: it is
+  # the only thing standing between an unbuildable change and `main`.
   pull_request:
     paths:
       - "Dockerfile"
@@ -65,9 +58,6 @@ concurrency:
 
 env:
   IMAGE: ghcr.io/juherr/steve
-  # Default tag for `push` triggers (no input available there).
-  # renovate: datasource=github-releases depName=steve-community/steve
-  DEFAULT_STEVE_REF: "steve-3.13.0"
   # Throwaway MariaDB for the code generation (same defaults as
   # application-docker.properties). Its credentials only serve the build: no
   # data, no secret, nothing of it reaches the image.
@@ -83,17 +73,26 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       # The tag comes from user input and is interpolated into shell commands
-      # below, so validate it against a strict format BEFORE any use.
+      # below, so validate it against a strict format BEFORE any use. The
+      # validation also covers the pull-request path, where the value is read
+      # out of the Dockerfile rather than typed.
       - name: Resolve and validate the SteVe tag
         id: ref
         env:
-          INPUT_REF: ${{ inputs.steve_ref || env.DEFAULT_STEVE_REF }}
+          INPUT_REF: ${{ inputs.steve_ref }}
         run: |
           set -euo pipefail
-          if ! printf '%s' "$INPUT_REF" | grep -Eq '^steve-[0-9]+\.[0-9]+\.[0-9]+$'; then
-            echo "Invalid SteVe tag: '$INPUT_REF' (expected steve-X.Y.Z)"; exit 1
+          ref="${INPUT_REF:-}"
+          if [ -z "$ref" ]; then
+            # Pull request: no input to read. Take the Dockerfile's own default
+            # rather than keeping a second copy of the release here — it is the
+            # version this branch would actually ship.
+            ref=$(sed -n 's/^ARG STEVE_REF=//p' Dockerfile | head -1)
           fi
-          echo "steve_ref=$INPUT_REF" >> "$GITHUB_OUTPUT"
+          if ! printf '%s' "$ref" | grep -Eq '^steve-[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "Invalid SteVe tag: '$ref' (expected steve-X.Y.Z)"; exit 1
+          fi
+          echo "steve_ref=$ref" >> "$GITHUB_OUTPUT"
 
       # Published on 0.0.0.0 rather than the loopback so that the documented
       # fallback (`--add-host …:host-gateway`, no host networking) also works
@@ -156,7 +155,7 @@ jobs:
           docker run --rm --entrypoint curl "${IMAGE}:${STEVE_REF}" --version >/dev/null
 
       - name: Login to GHCR
-        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        if: github.event_name == 'workflow_dispatch'
         env:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GHCR_USER: ${{ github.actor }}
@@ -169,7 +168,7 @@ jobs:
       # No `latest`, and no `sha-${GITHUB_SHA}` tag: the latter WOULD add a
       # stored version per build, for no benefit — consumers pin by digest.
       - name: Push
-        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        if: github.event_name == 'workflow_dispatch'
         env:
           STEVE_REF: ${{ steps.ref.outputs.steve_ref }}
         run: |
