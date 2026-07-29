@@ -41,23 +41,23 @@ run, and it keeps version-tracking tools pointed at something still being
 republished.
 
 ```bash
-docker buildx imagetools inspect ghcr.io/juherr/steve:steve-3.13.0
+docker buildx imagetools inspect ghcr.io/juherr/steve:steve-3.14.0
 ```
 
 ```yaml
-image: ghcr.io/juherr/steve:steve-3.13.0@sha256:<digest>
+image: ghcr.io/juherr/steve:steve-3.14.0@sha256:<digest>
 ```
 
 The exact JRE of an image you already hold is readable from it:
 
 ```bash
-docker run --rm --entrypoint java ghcr.io/juherr/steve:steve-3.13.0 -version
+docker run --rm --entrypoint java ghcr.io/juherr/steve:steve-3.14.0 -version
 ```
 
 ## Usage
 
 ```bash
-docker pull ghcr.io/juherr/steve:steve-3.13.0
+docker pull ghcr.io/juherr/steve:steve-3.14.0
 ```
 
 Minimal Compose setup:
@@ -65,7 +65,7 @@ Minimal Compose setup:
 ```yaml
 services:
   steve:
-    image: ghcr.io/juherr/steve:steve-3.13.0
+    image: ghcr.io/juherr/steve:steve-3.14.0
     restart: unless-stopped
     depends_on:
       steve-db:
@@ -169,7 +169,7 @@ docker run -d --name steve-build-db \
 
 docker build \
   --network=host \
-  --build-arg STEVE_REF=steve-3.13.0 \
+  --build-arg STEVE_REF=steve-3.14.0 \
   --build-arg DB_IP=127.0.0.1 \
   --build-arg BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
   --build-arg VCS_REF="$(git rev-parse HEAD)" \
