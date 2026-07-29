@@ -188,23 +188,32 @@ one has been deprecated since Docker Engine 23.
 
 ## Releasing
 
-Publishing is a push to the `release` branch:
+Publishing is the `release` branch moving to `main`. From the **Actions** tab,
+run the **Release** workflow on `main` — nothing else to fill in. Or, equally,
+from a terminal:
 
 ```bash
 git push origin main:release
 ```
 
-That builds on a GitHub-hosted runner and pushes to GHCR, printing the resulting
-digest at the end, ready to pin. The version built is whatever `ARG STEVE_REF`
-says in the `Dockerfile` on that commit — the single place the release is pinned
-in code.
+Either way the image builds on a GitHub-hosted runner and is pushed to GHCR,
+with the resulting digest printed at the end, ready to pin. The version built is
+whatever `ARG STEVE_REF` says in the `Dockerfile` on that commit — the single
+place the release is pinned in code, which is why the workflow asks for no
+version.
+
+The workflow adds one check the bare push cannot make: it refuses when the tag
+is already published *and* the packaging has not changed since, because that
+release would republish an identical image under a new digest and move the tag
+for everyone pinning it. A Temurin bump, which legitimately republishes the same
+tag, is not affected. Run it yourself with `./hack/release-preflight.sh`.
 
 Merging to `main` does **not** publish. "The packaging changed" and "a release
 should go out" are different events, and tying them together moved the release
 tag whenever a comment did. What merging does is run the same workflow on the
 pull request, everything but the push, so a change is proven to build before it
-lands. And because shipping is a branch rather than a button, what is waiting to
-go out is a plain git question:
+lands. And because shipping still moves a branch, what is waiting to go out
+stays a plain git question:
 
 ```bash
 git log release..main -- Dockerfile .dockerignore entrypoint.sh flyway-callbacks

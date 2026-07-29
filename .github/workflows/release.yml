@@ -1,0 +1,144 @@
+---
+# Ship what is on `main` — the release, from the Actions tab, no terminal.
+#
+# Publishing remains a push to `release`; this workflow performs that push
+# rather than replacing it. That distinction is the point: the branch still
+# moves, so the act keeps its record in git, `git log release..main` still
+# answers what is pending offline, and `git push origin main:release` from a
+# terminal stays exactly as valid. What was ruled out earlier was a button
+# *carrying a version* — an input duplicating the pin the Dockerfile owns.
+# There is no input here; the version shipped is whatever `ARG STEVE_REF` says
+# on `main`, read at dispatch time.
+#
+# Why the build is dispatched explicitly instead of being left to the `push:`
+# trigger of build-image.yml: a push made with GITHUB_TOKEN deliberately does
+# not start a new run, so nothing would happen. GitHub documents exactly two
+# exceptions, and `workflow_dispatch` is one of them:
+#
+#   "events triggered by the GITHUB_TOKEN will not create a new workflow run,
+#    with the following exceptions […] workflow_dispatch and repository_dispatch
+#    events always create workflow runs."
+#
+# So the last step below starts the build the way a human would, and no personal
+# access token is needed. build-image.yml is untouched — dispatching it with
+# `--ref release` satisfies its `github.ref_name == 'release'` guard, which
+# stays the single thing standing between any branch and GHCR.
+
+name: Release
+
+on:
+  workflow_dispatch:
+
+# Above the repository default of read-only, deliberately and only here:
+# `contents` to fast-forward the branch, `actions` to start the build on it.
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  # Two releases must not interleave their pushes to the same branch. Never
+  # cancel: a half-run release has already moved `release`.
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: ship main
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # The Actions tab offers a branch selector, and the wrong choice here
+      # would ship an arbitrary branch to every consumer. A failed step rather
+      # than a job-level `if`: a skipped job is a green run that did nothing,
+      # which reads as success.
+      - name: Refuse to release anything but main
+        if: github.ref_name != 'main'
+        # Through the environment, not interpolated into the script: the ref is
+        # picked from a dropdown, and a branch name may contain shell
+        # metacharacters.
+        env:
+          DISPATCHED_FROM: ${{ github.ref_name }}
+        run: |
+          echo "Releases ship main; this was dispatched from '${DISPATCHED_FROM}'."
+          echo "Re-run it with 'main' selected in the branch dropdown."
+          exit 1
+
+      # Full history and every branch: the preflight walks back to the commit
+      # the published image was built from, which can be many merges back.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+
+      # Would this publish anything, or only move a digest? The reasoning lives
+      # in the script, which is runnable by hand for the same reason the drift
+      # check is.
+      - name: Preflight — is there something to ship?
+        run: ./hack/release-preflight.sh
+
+      - name: Fast-forward release to main
+        run: |
+          set -euo pipefail
+          # The branch protection forbids force-pushes, so a non-fast-forward
+          # would be rejected by the remote anyway — checked here to fail with a
+          # sentence instead of a git error.
+          if ! git merge-base --is-ancestor origin/release HEAD; then
+            echo "origin/release is not an ancestor of main — refusing to rewrite it."
+            echo "Someone pushed to release directly, or main was rewritten."
+            exit 1
+          fi
+          if git diff --quiet origin/release HEAD; then
+            echo "release already points at main (${GITHUB_SHA})."
+          else
+            git push origin "HEAD:refs/heads/release"
+            echo "release fast-forwarded to ${GITHUB_SHA}."
+          fi
+
+      # Started explicitly: see the header — a GITHUB_TOKEN push does not
+      # trigger a workflow, a workflow_dispatch does.
+      - name: Start the build on release
+        id: build
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          latest() {
+            gh run list --workflow build-image.yml --branch release \
+              --limit 1 --json databaseId --jq '.[0].databaseId // 0'
+          }
+          before=$(latest)
+          gh workflow run build-image.yml --ref release
+
+          # The dispatch API returns no run id, so wait for one to appear rather
+          # than hand back a link to a list and call it done.
+          for _ in $(seq 1 20); do
+            sleep 3
+            id=$(latest)
+            if [ "${id}" != "${before}" ]; then
+              echo "run_id=${id}" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          done
+          echo "The build was dispatched but has not appeared yet." >&2
+
+      - name: Summary
+        env:
+          RUN_ID: ${{ steps.build.outputs.run_id }}
+          REPO_URL: ${{ github.server_url }}/${{ github.repository }}
+        run: |
+          set -euo pipefail
+          steve_ref=$(sed -n 's/^ARG STEVE_REF=//p' Dockerfile | head -1)
+          {
+            echo "### Releasing \`${steve_ref}\`"
+            echo
+            echo "\`release\` now points at \`${GITHUB_SHA}\`."
+            echo
+            if [ -n "${RUN_ID:-}" ]; then
+              echo "Build: ${REPO_URL}/actions/runs/${RUN_ID}"
+            else
+              echo "Build: ${REPO_URL}/actions/workflows/build-image.yml?query=branch%3Arelease"
+            fi
+            echo
+            echo "The digest to pin is printed by that run's **Push** step."
+            echo "It publishes \`ghcr.io/juherr/steve:${steve_ref}\`; nothing is on"
+            echo "GHCR until it goes green."
+          } >> "$GITHUB_STEP_SUMMARY"

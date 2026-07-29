@@ -22,8 +22,10 @@ this repository — if something must change in SteVe, it changes upstream.
 | `.github/workflows/build-image.yml` | Build & push to GHCR — see its `on:` block for the triggers |
 | `.github/workflows/lint.yml` | hadolint / shellcheck / actionlint |
 | `.github/workflows/scan-published.yml` | Weekly Trivy scan of the tags already on GHCR |
+| `.github/workflows/release.yml` | The release, from the Actions tab: preflight, fast-forward `release`, start the build |
 | `.github/workflows/release-drift.yml` | Schedules `hack/release-drift.sh` — see that script for what it compares |
 | `hack/release-drift.sh` | Published image vs the `release` branch; runnable by hand |
+| `hack/release-preflight.sh` | Would releasing HEAD publish anything, or only move a digest; runnable by hand |
 | `README.md` | User-facing documentation |
 | `NOTICE` | License aggregation of the produced image — must stay accurate |
 | `renovate.json` | Dependency pinning automation |
@@ -111,12 +113,24 @@ or swapping a component changes the obligations.
   idempotent — it is not redundant work.
 - **`curl` is installed in the runtime stage** on purpose: the documented
   Compose healthcheck shells out to it, and CI asserts it is present.
-- **Merging does not publish; pushing `release` does.** `git push origin
-  main:release` is the release. The publish steps are guarded on
-  `github.ref_name == 'release'`, so no other branch and no dispatch from
-  elsewhere can ship. Restoring a `push:` trigger on `main` would republish
-  `steve-X.Y.Z` under a new digest for a comment fixed in the `Dockerfile` —
-  that is what it used to do.
+- **Merging does not publish; moving `release` does.** Either `git push origin
+  main:release`, or the `Release` workflow from the Actions tab, which performs
+  that same push. The publish steps are guarded on `github.ref_name ==
+  'release'`, so no other branch and no dispatch from elsewhere can ship.
+  Restoring a `push:` trigger on `main` would republish `steve-X.Y.Z` under a
+  new digest for a comment fixed in the `Dockerfile` — that is what it used to
+  do.
+- **`release.yml` moves the branch; it does not become a second way to ship.**
+  It exists so that releasing needs no terminal. It carries **no version input**
+  — the version is read from `ARG STEVE_REF` at dispatch time, and an input
+  would duplicate the pin the `Dockerfile` owns, which is the thing that was
+  ruled out, rather than buttons as such. It dispatches `build-image.yml`
+  explicitly instead of relying on its `push:` trigger because a push made with
+  `GITHUB_TOKEN` does not start a workflow run — `workflow_dispatch` is one of
+  the two documented exceptions, which is also why no PAT is needed here. Do not
+  "simplify" this into a `workflow_call` of `build-image.yml`: that would mean
+  replacing the `ref_name == 'release'` guard with an input, and that guard is
+  the invariant.
 - **`release-drift.yml` answers the one question git cannot.** The branch
   records what was *meant* to ship; the registry label records what actually
   did. A build that fails after `release` moved leaves the branch claiming a

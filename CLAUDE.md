@@ -64,9 +64,17 @@ Use the native file and search tools.
 ## Scope
 
 Merging no longer publishes. Pushing a branch and opening a PR is safe;
-**`git push origin main:release` is the release** and overwrites
-`ghcr.io/juherr/steve:steve-X.Y.Z` for every consumer. Never push that branch
-unless asked for a release in so many words — "merge this" is not that.
+**moving `release` is the release** and overwrites
+`ghcr.io/juherr/steve:steve-X.Y.Z` for every consumer. Two ways in, same act and
+same caution: `git push origin main:release`, or `gh workflow run release.yml
+--ref main`, which is the terminal-free path the Actions tab offers. Never do
+either unless asked for a release in so many words — "merge this" is not that.
+
+`hack/release-preflight.sh` refuses the case that used to be silent — the tag is
+already published and the packaging has not moved, so shipping would only swap
+the digest under consumers. It gates rather than reports, so it fails closed:
+run it by hand before answering "is there anything to ship?" rather than
+reasoning from `git log`, which cannot see that the image would be identical.
 
 After merging anything under `Dockerfile`, `.dockerignore`, `entrypoint.sh` or
 `flyway-callbacks/`, say plainly that the change is merged but not shipped, and
