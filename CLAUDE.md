@@ -25,6 +25,14 @@ locally. So:
 - For label-only changes, inspecting `.Config.Labels` on the built image is the
   proof; reading the `Dockerfile` is not.
 
+The rule extends to claims *about the tools themselves*. Comments and
+documentation here assert how hadolint, Trivy, Renovate, BuildKit or GHCR
+behave, and those assertions get believed and built on. Run the thing before
+writing the sentence. Two comments in this repository were written from
+plausible reasoning and turned out false when measured — one claiming Trivy's
+secret scanner reads deleted layers, one describing the build as avoiding
+BuildKit. Where a claim was measured, the comment says so; keep that habit.
+
 ## Inspecting the published image and package
 
 `gh` is authenticated, and the GHCR package is public, so the registry can be
@@ -55,7 +63,12 @@ Use the native file and search tools.
 
 ## Scope
 
-Pushing to `main` publishes to GHCR: the `push` trigger fires on the packaging
-files and overwrites the release tags. Treat any commit touching `Dockerfile`,
-`entrypoint.sh`, `flyway-callbacks/` or the workflow as a release, and confirm
-before pushing.
+Merging no longer publishes. Pushing a branch and opening a PR is safe;
+**`git push origin main:release` is the release** and overwrites
+`ghcr.io/juherr/steve:steve-X.Y.Z` for every consumer. Never push that branch
+unless asked for a release in so many words — "merge this" is not that.
+
+After merging anything under `Dockerfile`, `.dockerignore`, `entrypoint.sh` or
+`flyway-callbacks/`, say plainly that the change is merged but not shipped, and
+what would ship it. Do not let it pass silently: `release-drift.yml` reports it
+too, but only as a step-summary note.

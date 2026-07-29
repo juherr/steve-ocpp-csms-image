@@ -22,6 +22,7 @@ this repository — if something must change in SteVe, it changes upstream.
 | `.github/workflows/build-image.yml` | Build & push to GHCR — see its `on:` block for the triggers |
 | `.github/workflows/lint.yml` | hadolint / shellcheck / actionlint |
 | `.github/workflows/scan-published.yml` | Weekly Trivy scan of the tags already on GHCR |
+| `.github/workflows/release-drift.yml` | Warns when `main`'s packaging is ahead of the published image |
 | `README.md` | User-facing documentation |
 | `NOTICE` | License aggregation of the produced image — must stay accurate |
 | `renovate.json` | Dependency pinning automation |
@@ -63,12 +64,12 @@ updates. A comment adjacent to the pin is not enough — check that
 silently freezes. `customManagers[1]` deliberately matches every workflow, so a
 linter or scanner added later is managed on arrival.
 
-The SteVe release is the one version Renovate cannot fully own. It appears in
-`ARG STEVE_REF` (`Dockerfile`), in `DEFAULT_STEVE_REF` and the
-`workflow_dispatch` `default:` (workflow) — all three managed and landing in one
-PR — plus the examples in `README.md`, which are prose and must be edited by
-hand. The JRE major is a fourth hand-edited mention: `README.md` names it under
-**Tags**, so a `eclipse-temurin` bump has to update that sentence too.
+The SteVe release is pinned in exactly one place in code: `ARG STEVE_REF` in the
+`Dockerfile`. Both the pull-request build and the release read it from there, so
+the version a branch would ship and the version its build tests cannot disagree.
+The examples in `README.md` are prose and must be edited by hand, as is the JRE
+major, which `README.md` names under **Tags** — an `eclipse-temurin` bump has to
+update that sentence too.
 
 **Update `NOTICE` when the image composition changes.** The repository files are
 Apache-2.0, but the produced image aggregates SteVe (GPL-3.0-or-later), the
@@ -101,6 +102,18 @@ or swapping a component changes the obligations.
   idempotent — it is not redundant work.
 - **`curl` is installed in the runtime stage** on purpose: the documented
   Compose healthcheck shells out to it, and CI asserts it is present.
+- **Merging does not publish; pushing `release` does.** `git push origin
+  main:release` is the release. The publish steps are guarded on
+  `github.ref_name == 'release'`, so no other branch and no dispatch from
+  elsewhere can ship. Restoring a `push:` trigger on `main` would republish
+  `steve-X.Y.Z` under a new digest for a comment fixed in the `Dockerfile` —
+  that is what it used to do.
+- **`release-drift.yml` answers the one question git cannot.** The branch
+  records what was *meant* to ship; the registry label records what actually
+  did. A build that fails after `release` moved leaves the branch claiming a
+  release that never landed, and `git log release..main` would then say
+  "nothing pending" — a silent wrong answer. Do not delete this workflow on the
+  grounds that the branch already tells you.
 - **Trivy runs weekly on the published tags, not during the build.** An image is
   clean the day it is built and says nothing about the day after; the question
   worth answering is whether a *published* tag has drifted. It is report-only
@@ -115,6 +128,22 @@ or swapping a component changes the obligations.
   local investigation tool — the command is under "Verifying a change".
 
 ## Verifying a change
+
+**Check with the credentials the target will have, not the ones you happen to
+hold.** `scan-published.yml` discovers its tags from the GHCR registry rather
+than from `/users/juherr/packages/container/steve/versions`, because that REST
+endpoint is scoped to the user account. It was once "verified" locally with a
+personal token that happened to carry `read:packages` — which said nothing about
+the workflow, whose `GITHUB_TOKEN` is issued for the repository. The registry
+answers the same question with no credentials at all, the package being public,
+so the question stops arising; it has no pagination trap either.
+
+Keep that narrow. `GITHUB_TOKEN` reaches GHCR perfectly well — `build-image.yml`
+logs in with it and pushes — and the runner has Docker. The gap was one REST
+endpoint's scope, not a general tier difference, which is the point: check the
+specific permission instead of assuming a tier in either direction. The `gh` and
+`curl` recipes in `CLAUDE.md` inspect what is already published, and there your
+own credentials are the right ones.
 
 The linters are the cheap gate. Run the three steps of
 `.github/workflows/lint.yml` — that file pins the images, so copying the

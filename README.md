@@ -40,10 +40,6 @@ so the tag alongside it is documentation: a moving tag cannot change what you
 run, and it keeps version-tracking tools pointed at something still being
 republished.
 
-> `steve-3.13.0-java25` was published once, before the JRE was dropped from the
-> tag scheme. It is frozen at that build and is no longer produced, documented
-> or scanned — move to `steve-3.13.0`.
-
 ```bash
 docker buildx imagetools inspect ghcr.io/juherr/steve:steve-3.13.0
 ```
@@ -192,12 +188,34 @@ one has been deprecated since Docker Engine 23.
 
 ## Releasing
 
-The `Build SteVe image` workflow (`workflow_dispatch`) takes a `steve_ref` input
-such as `steve-3.13.0`, builds on a GitHub-hosted runner and pushes to GHCR. It
-prints the resulting digest at the end, ready to pin.
+Publishing is a push to the `release` branch:
 
-The same workflow runs on pull requests, everything but the push: a change to
-the packaging is proven to build before it can be merged.
+```bash
+git push origin main:release
+```
+
+That builds on a GitHub-hosted runner and pushes to GHCR, printing the resulting
+digest at the end, ready to pin. The version built is whatever `ARG STEVE_REF`
+says in the `Dockerfile` on that commit — the single place the release is pinned
+in code.
+
+Merging to `main` does **not** publish. "The packaging changed" and "a release
+should go out" are different events, and tying them together moved the release
+tag whenever a comment did. What merging does is run the same workflow on the
+pull request, everything but the push, so a change is proven to build before it
+lands. And because shipping is a branch rather than a button, what is waiting to
+go out is a plain git question:
+
+```bash
+git log release..main -- Dockerfile .dockerignore entrypoint.sh flyway-callbacks
+```
+
+A `Release drift` workflow covers what git cannot answer: whether a push to
+`release` actually produced an image. It compares the
+`org.opencontainers.image.revision` label of the published tag against the
+packaging on `release`, and warns when they diverge — a build that failed after
+the branch moved would otherwise leave the branch claiming a release that never
+landed.
 
 Separately, every published `steve-X.Y.Z` tag is re-scanned weekly with
 [Trivy](https://trivy.dev) and the results land in the repository's *Security*

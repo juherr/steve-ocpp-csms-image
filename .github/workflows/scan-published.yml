@@ -64,7 +64,7 @@ jobs:
             "https://ghcr.io/token?scope=repository:${REGISTRY_REPO}:pull&service=ghcr.io" \
             | jq -r .token)
           # Anything that is not a steve-X.Y.Z release tag is not ours to
-          # monitor — same shape as the build's workflow_dispatch input.
+          # monitor — same shape the build validates ARG STEVE_REF against.
           #
           # Only the three most recent releases: an immutable old tag's CVE list
           # only ever grows and the answer for whoever pinned it is always "move
