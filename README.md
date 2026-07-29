@@ -40,10 +40,6 @@ so the tag alongside it is documentation: a moving tag cannot change what you
 run, and it keeps version-tracking tools pointed at something still being
 republished.
 
-> `steve-3.13.0-java25` was published once, before the JRE was dropped from the
-> tag scheme. It is frozen at that build and is no longer produced, documented
-> or scanned — move to `steve-3.13.0`.
-
 ```bash
 docker buildx imagetools inspect ghcr.io/juherr/steve:steve-3.13.0
 ```
