@@ -1,23 +1,12 @@
 ---
-# Does the published image match what `release` says was shipped?
+# Reports when the published image and the `release` branch have parted
+# company. What it compares and why is documented in the script it runs —
+# `hack/release-drift.sh`, which is also how you check by hand.
 #
-# Publishing is a push to `release`, so git already answers "what is waiting to
-# go out" — `git log release..main`, offline, instantly. Git cannot answer the
-# other question: whether the push actually produced an image. A build that
-# fails after `release` has moved leaves the branch claiming a release that
-# never landed, and the next person to diff the branches sees nothing pending
-# and believes the image is current. Only the registry knows, and it is the one
-# source that cannot lie about it.
-#
-# So this reads org.opencontainers.image.revision off the newest published tag
-# and compares it with `release`. `main` being ahead of `release` is reported
-# too, but as information, not a warning: an unreleased change is a deliberate
-# state, and warning about it would be crying wolf at the normal case.
-#
-# The comparison is scoped to the files whose content ends up in the image. It
-# ignores this repository's own workflows: an edit there *can* change the built
-# image (a new build-arg would), but most are orchestration, and a warning that
-# fires on every workflow tweak stops being read within a month.
+# Why these triggers: on a push to `main` because that is when a packaging
+# change becomes pending, on a push to `release` because that is when a publish
+# is supposed to have happened, and weekly because "supposed to" is exactly what
+# needs re-asking a few days later.
 
 name: Release drift
 
@@ -39,9 +28,6 @@ concurrency:
   group: release-drift
   cancel-in-progress: true
 
-env:
-  REGISTRY_REPO: juherr/steve
-
 jobs:
   drift:
     name: published vs release
@@ -55,79 +41,4 @@ jobs:
           fetch-depth: 0
 
       - name: Compare the published image with the release branch
-        run: |
-          set -euo pipefail
-          git fetch --quiet --prune origin '+refs/heads/*:refs/remotes/origin/*'
-
-          token=$(curl -fsS \
-            "https://ghcr.io/token?scope=repository:${REGISTRY_REPO}:pull&service=ghcr.io" \
-            | jq -r .token)
-
-          tag=$(curl -fsS -H "Authorization: Bearer ${token}" \
-            "https://ghcr.io/v2/${REGISTRY_REPO}/tags/list?n=1000" \
-            | jq -r '[(.tags // [])[] | select(test("^steve-[0-9]+\\.[0-9]+\\.[0-9]+$"))]
-                     | sort_by(ltrimstr("steve-") | split(".") | map(tonumber))
-                     | last // empty')
-          if [ -z "${tag}" ]; then
-            echo "Nothing published yet — nothing to compare."; exit 0
-          fi
-
-          config=$(curl -fsS -H "Authorization: Bearer ${token}" \
-            -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \
-            "https://ghcr.io/v2/${REGISTRY_REPO}/manifests/${tag}" | jq -r .config.digest)
-          published=$(curl -fsSL -H "Authorization: Bearer ${token}" \
-            "https://ghcr.io/v2/${REGISTRY_REPO}/blobs/${config}" \
-            | jq -r '.config.Labels["org.opencontainers.image.revision"] // empty')
-
-          if [ -z "${published}" ] || ! git cat-file -e "${published}^{commit}" 2>/dev/null; then
-            echo "::warning::${tag} carries revision '${published}', which is not a commit in this repository — it predates the current history, or was built elsewhere. Cannot compare."
-            exit 0
-          fi
-
-          # The files whose content reaches the image, as an array: relying on
-          # word splitting here would be a silent trap, and this script is meant
-          # to be runnable by hand under any shell.
-          paths=(Dockerfile .dockerignore entrypoint.sh flyway-callbacks)
-
-          # Before the release branch exists, fall back to main so this workflow
-          # is useful from the first run rather than silently inert.
-          if git rev-parse --verify --quiet origin/release >/dev/null; then
-            shipped="origin/release"
-          else
-            shipped="origin/main"
-            echo "::notice::No \`release\` branch yet — comparing against main."
-          fi
-
-          # Compare the trees, not the commit count. It answers the question
-          # being asked — does the published image's packaging differ from what
-          # was meant to ship — and it stays right when a change is made and
-          # reverted, where counting commits would report two and mean nothing.
-          if git diff --quiet "${published}" "${shipped}" -- "${paths[@]}"; then
-            echo "In sync: ${tag} was built from ${published}, whose packaging is ${shipped}'s."
-          else
-            echo "::warning::The packaging on ${shipped} and that of the published ${tag} (built from ${published}) have diverged. Usually a publish that did not land; also possible if the release branch moved backwards. Re-run \"Build SteVe image\" from the release branch."
-            {
-              echo "### Published image does not match \`${shipped}\`"
-              echo
-              echo "\`${tag}\` was built from \`${published}\`, and its packaging differs from \`${shipped}\`:"
-              echo
-              echo '```'
-              git diff --stat "${published}" "${shipped}" -- "${paths[@]}"
-              echo '```'
-              git log --format='- %h %s' "${published}..${shipped}" -- "${paths[@]}"
-            } >> "${GITHUB_STEP_SUMMARY}"
-          fi
-
-          # Informational only. main ahead of release is the normal state
-          # between a merge and the release that ships it.
-          if [ "${shipped}" = "origin/release" ] \
-             && ! git diff --quiet origin/release origin/main -- "${paths[@]}"; then
-            {
-              echo "### Packaging changes waiting on \`main\`"
-              echo
-              git log --format='- %h %s' origin/release..origin/main -- "${paths[@]}"
-              echo
-              echo "Ship them with \`git push origin main:release\`."
-            } >> "${GITHUB_STEP_SUMMARY}"
-            echo "Packaging changes are waiting on main — normal between a merge and the release that ships them."
-          fi
+        run: ./hack/release-drift.sh
