@@ -245,4 +245,4 @@ source requirement is met.
 
 ---
 
-<a href="https://juherr.dev"><img src=".github/assets/juherr-dev.png" alt="" width="18" height="18" align="middle"></a> <sub>A project by <a href="https://juherr.dev"><b>juherr.dev</b></a> ↗</sub>
+<a href="https://juherr.dev"><img src=".github/assets/juherr-dev.png" alt="" width="18" height="18" align="middle"> <sub>A project by <b>juherr.dev</b> ↗</sub></a>
