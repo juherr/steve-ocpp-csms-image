@@ -213,7 +213,7 @@ docker inspect steve:local --format '{{ .Config.User }}'                 # 10001
 Against the published image:
 
 ```bash
-docker buildx imagetools inspect ghcr.io/juherr/steve:steve-3.14.0
+docker buildx imagetools inspect ghcr.io/juherr/steve:steve-3.14.1
 ```
 
 When the image grows unexpectedly, the layer-by-layer breakdown — what each
