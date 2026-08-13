@@ -21,7 +21,7 @@
 
 # --- Build stage: compile the .war from a pinned upstream release tag ---------
 # renovate: datasource=github-releases depName=steve-community/steve
-ARG STEVE_REF=steve-3.14.0
+ARG STEVE_REF=steve-3.14.1
 
 FROM eclipse-temurin:25.0.3_9-jdk AS build
 
@@ -64,7 +64,7 @@ RUN ./mvnw -B -V -DskipTests -Dmaven.javadoc.skip=true \
 # --- Source of the Flyway CLI (migrates the runtime database on startup) ------
 # Official glibc image (not -alpine): its JRE and executable must run inside the
 # temurin runtime stage, which is glibc-based. Pinned tag.
-FROM flyway/flyway:13.0.0 AS flyway
+FROM flyway/flyway:13.3.0 AS flyway
 
 # --- Runtime stage: JRE + Flyway CLI + migration scripts + the .war -----------
 FROM eclipse-temurin:25.0.3_9-jre

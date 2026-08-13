@@ -72,12 +72,19 @@ later is managed on arrival.
 The SteVe release is pinned in exactly one place in code: `ARG STEVE_REF` in the
 `Dockerfile`. Both the pull-request build and the release read it from there, so
 the version a branch would ship and the version its build tests cannot disagree.
-The examples in `README.md`, this file and `CLAUDE.md` are managed too and land
-in the same PR — prose has no `# renovate:` comment to hang off, so they are
-matched on the literal `ghcr.io/juherr/steve:`, `STEVE_REF=` and `manifests/`
-forms. Keep those shapes when editing an example, or it leaves Renovate's reach;
-illustrations naming no real tag say `steve-X.Y.Z` and are matched by nothing,
-deliberately.
+`README.md` is the one document that names the release literally, because its
+commands are meant to be pasted by someone who does not yet know which version
+to ask for. Those examples are managed too and land in the same PR — prose has
+no `# renovate:` comment to hang off, so `customManagers[2]` matches on the
+literal `ghcr.io/juherr/steve:`, `STEVE_REF=` and `manifests/` forms. Keep those
+shapes when editing a README example, or it leaves Renovate's reach; the third
+form matches nothing today and is kept for the next document that uses it.
+
+This file and `CLAUDE.md` read the tag out of the pin instead —
+`$(sed -n 's/^ARG STEVE_REF=//p' Dockerfile)`. Their reader has the repository
+in hand, so a literal here would only be a fourth copy of the one pin, right up
+until it described a tag the tree no longer ships. Illustrations naming no real
+tag say `steve-X.Y.Z` and are matched by nothing, deliberately.
 
 The JRE major is the one version mention Renovate does not own: `README.md`
 names it under **Tags**, so an `eclipse-temurin` bump has to update that
@@ -213,7 +220,7 @@ docker inspect steve:local --format '{{ .Config.User }}'                 # 10001
 Against the published image:
 
 ```bash
-docker buildx imagetools inspect ghcr.io/juherr/steve:steve-3.14.0
+docker buildx imagetools inspect "ghcr.io/juherr/steve:$(sed -n 's/^ARG STEVE_REF=//p' Dockerfile)"
 ```
 
 When the image grows unexpectedly, the layer-by-layer breakdown — what each

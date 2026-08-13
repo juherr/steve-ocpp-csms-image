@@ -9,6 +9,12 @@ The LICENSE file does NOT cover the contents of the Docker image these files
 produce. That image is an aggregate of separate, independently licensed
 programs, listed below.
 
+Each is identified by name, not by tag. Which versions a given image actually
+holds is recorded by that image — the SteVe release in
+`org.opencontainers.image.version`, everything else through the `Dockerfile` at
+the commit in `org.opencontainers.image.revision`. A tag copied into this file
+could only fall behind them, and none of the licenses below turns on it.
+
 
 -------------------------------------------------------------------------------
 SteVe — GPL-3.0-or-later
@@ -45,9 +51,9 @@ Flyway CLI (Open Source Edition) — Apache-2.0
     https://github.com/flyway/flyway
     https://hub.docker.com/r/flyway/flyway
 
-Copied unmodified from the `flyway/flyway:13.0.0` image, which is the Open
-Source Edition. It is distinct from Redgate's commercial `redgate/flyway` image,
-which is the one requiring a license key and EULA acceptance.
+Copied unmodified from the `flyway/flyway` image, which is the Open Source
+Edition. It is distinct from Redgate's commercial `redgate/flyway` image, which
+is the one requiring a license key and EULA acceptance.
 
 The Flyway CLI is used as a separate program, in a separate process, before
 SteVe starts: it replays SteVe's schema migrations against the runtime database.
@@ -64,7 +70,7 @@ Eclipse Temurin JRE — GPL-2.0 WITH Classpath-exception-2.0
     https://adoptium.net/
 
 Two independent runtimes are present:
-  - the image's own JRE (`eclipse-temurin:25.0.3_9-jre`), which runs SteVe;
+  - the image's own JRE (`eclipse-temurin`), which runs SteVe;
   - the JRE bundled inside the Flyway CLI, which runs Flyway.
 
 The Classpath Exception permits linking application code without extending the
