@@ -23,7 +23,7 @@ concurrency:
 
 env:
   # renovate: datasource=docker depName=hadolint/hadolint
-  HADOLINT_IMAGE: "hadolint/hadolint:v2.14.0-alpine"
+  HADOLINT_IMAGE: "hadolint/hadolint:v2.15.1-alpine"
   # renovate: datasource=docker depName=rhysd/actionlint
   ACTIONLINT_IMAGE: "rhysd/actionlint:1.7.12"
 
