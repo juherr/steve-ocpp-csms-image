@@ -64,7 +64,7 @@ RUN ./mvnw -B -V -DskipTests -Dmaven.javadoc.skip=true \
 # --- Source of the Flyway CLI (migrates the runtime database on startup) ------
 # Official glibc image (not -alpine): its JRE and executable must run inside the
 # temurin runtime stage, which is glibc-based. Pinned tag.
-FROM flyway/flyway:13.0.0 AS flyway
+FROM flyway/flyway:13.3.0 AS flyway
 
 # --- Runtime stage: JRE + Flyway CLI + migration scripts + the .war -----------
 FROM eclipse-temurin:25.0.3_9-jre
