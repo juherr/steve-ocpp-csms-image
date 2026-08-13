@@ -12,8 +12,8 @@
 # us when a rebuild is worth publishing.
 #
 # The tags are discovered from the registry instead of being restated here: the
-# SteVe release is already pinned in three places that must move together (see
-# AGENTS.md) and a fourth would rot.
+# SteVe release is already pinned in the Dockerfile and echoed in the README,
+# which move together (see AGENTS.md); one more copy would rot.
 #
 # GitHub disables scheduled workflows after 60 days without repository activity;
 # on a packaging repository that can happen between two SteVe releases. If the

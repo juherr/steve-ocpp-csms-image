@@ -47,10 +47,11 @@ gh run list --limit 10
 Reading the labels of a published tag without pulling it:
 
 ```bash
+TAG=$(sed -n 's/^ARG STEVE_REF=//p' Dockerfile)   # or any tag already published
 TOKEN=$(curl -s "https://ghcr.io/token?scope=repository:juherr/steve:pull&service=ghcr.io" | jq -r .token)
 CFG=$(curl -s -H "Authorization: Bearer $TOKEN" \
   -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \
-  https://ghcr.io/v2/juherr/steve/manifests/steve-3.14.1 | jq -r .config.digest)
+  "https://ghcr.io/v2/juherr/steve/manifests/$TAG" | jq -r .config.digest)
 curl -sL -H "Authorization: Bearer $TOKEN" "https://ghcr.io/v2/juherr/steve/blobs/$CFG" | jq '.config.Labels'
 ```
 
