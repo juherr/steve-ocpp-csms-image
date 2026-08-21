@@ -23,7 +23,7 @@
 # renovate: datasource=github-releases depName=steve-community/steve
 ARG STEVE_REF=steve-3.14.1
 
-FROM eclipse-temurin:25.0.3_9-jdk AS build
+FROM eclipse-temurin:25.0.4_7-jdk AS build
 
 ARG STEVE_REF
 # Host of the throwaway database used by the jOOQ/Flyway code generation during
@@ -67,7 +67,7 @@ RUN ./mvnw -B -V -DskipTests -Dmaven.javadoc.skip=true \
 FROM flyway/flyway:13.3.0 AS flyway
 
 # --- Runtime stage: JRE + Flyway CLI + migration scripts + the .war -----------
-FROM eclipse-temurin:25.0.3_9-jre
+FROM eclipse-temurin:25.0.4_7-jre
 
 ARG STEVE_REF
 # Build metadata. Without these, the image would silently inherit the base
