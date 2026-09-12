@@ -51,16 +51,19 @@ Flyway CLI (Open Source Edition) — Apache-2.0
     https://github.com/flyway/flyway
     https://hub.docker.com/r/flyway/flyway
 
-Copied unmodified from the `flyway/flyway` image, which is the Open Source
-Edition. It is distinct from Redgate's commercial `redgate/flyway` image, which
-is the one requiring a license key and EULA acceptance.
+Copied from the `flyway/flyway` image, which is the Open Source Edition. It is
+distinct from Redgate's commercial `redgate/flyway` image, which is the one
+requiring a license key and EULA acceptance.
+
+The copy is reduced, not altered: the JDBC drivers and Flyway database plugins
+for databases other than MariaDB are deleted (see the Dockerfile), and every
+file kept is byte-identical to upstream's. The one driver retained is MariaDB
+Connector/J — LGPL-2.1, https://github.com/mariadb-corporation/mariadb-connector-j
+— used unmodified as a separate library, which the LGPL permits.
 
 The Flyway CLI is used as a separate program, in a separate process, before
 SteVe starts: it replays SteVe's schema migrations against the runtime database.
 There is no linking between it and SteVe — this is mere aggregation.
-
-That upstream image also bundles a Java runtime and a set of JDBC drivers, each
-under its own license; refer to the `flyway/flyway` image for their terms.
 
 
 -------------------------------------------------------------------------------
@@ -69,9 +72,8 @@ Eclipse Temurin JRE — GPL-2.0 WITH Classpath-exception-2.0
 
     https://adoptium.net/
 
-Two independent runtimes are present:
-  - the image's own JRE (`eclipse-temurin`), which runs SteVe;
-  - the JRE bundled inside the Flyway CLI, which runs Flyway.
+One runtime is present, the image's own JRE (`eclipse-temurin`). It runs both
+SteVe and the Flyway CLI, which ships none of its own.
 
 The Classpath Exception permits linking application code without extending the
 GPL to that application.

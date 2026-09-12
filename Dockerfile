@@ -23,7 +23,7 @@
 # renovate: datasource=github-releases depName=steve-community/steve
 ARG STEVE_REF=steve-3.14.1
 
-FROM eclipse-temurin:25.0.3_9-jdk AS build
+FROM eclipse-temurin:25.0.4_7-jdk AS build
 
 ARG STEVE_REF
 # Host of the throwaway database used by the jOOQ/Flyway code generation during
@@ -62,12 +62,29 @@ RUN ./mvnw -B -V -DskipTests -Dmaven.javadoc.skip=true \
     clean package
 
 # --- Source of the Flyway CLI (migrates the runtime database on startup) ------
-# Official glibc image (not -alpine): its JRE and executable must run inside the
-# temurin runtime stage, which is glibc-based. Pinned tag.
-FROM flyway/flyway:13.3.0 AS flyway
+# Official glibc image (not -alpine): the CLI ships no JRE of its own and runs
+# on the runtime stage's Temurin, which is glibc-based. Pinned tag.
+FROM flyway/flyway:13.6.0 AS flyway
+
+# Keep only the MariaDB path. The CLI ships ~20 JDBC drivers and their Flyway
+# plugins; the entrypoint only ever opens jdbc:mariadb://, and the unused
+# drivers carry CVEs this repository cannot fix (the Couchbase driver shades its
+# own netty, still a vulnerable one in 13.6.0). Drivers and plugins go together:
+# the plugin registry loads every flyway-database-* jar at startup and each
+# needs its driver — measured, pruning drivers/ alone dies with
+# ClassNotFoundException. MariaDB support lives in flyway-mysql, which stays.
+# `flyway version` needs no database yet still runs that registry, so it fails
+# the build if a Flyway bump ships a plugin whose driver is removed here.
+# Done in this throwaway stage so nothing deleted lingers in a runtime layer.
+RUN find /flyway/drivers -mindepth 1 ! -name 'mariadb-java-client-*.jar' -delete \
+    && find /flyway/lib/flyway \( -name 'flyway-database-*.jar' -o -name 'flyway-gcp-*.jar' \
+         -o -name 'flyway-sqlserver-*.jar' -o -name 'flyway-singlestore-*.jar' \
+         -o -name 'flyway-firebird-*.jar' -o -name 'flyway-locations-s3-*.jar' \) -delete \
+    && rm -rf /flyway/lib/netty /flyway/lib/aad \
+    && /flyway/flyway version
 
 # --- Runtime stage: JRE + Flyway CLI + migration scripts + the .war -----------
-FROM eclipse-temurin:25.0.3_9-jre
+FROM eclipse-temurin:25.0.4_7-jre
 
 ARG STEVE_REF
 # Build metadata. Without these, the image would silently inherit the base
@@ -98,8 +115,8 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-# Flyway CLI (with its own JRE and MariaDB/MySQL drivers) + SteVe's migration
-# scripts taken from the very clone that produced the .war — binary and schema
+# Flyway CLI (pruned above to the MariaDB driver) + SteVe's migration scripts
+# taken from the very clone that produced the .war — binary and schema
 # therefore cannot drift apart.
 COPY --from=flyway /flyway /flyway
 COPY --from=build /code/src/main/resources/db/migration /flyway/sql

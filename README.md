@@ -238,7 +238,7 @@ The packaging files in this repository are **Apache-2.0** (see [LICENSE](LICENSE
 
 The **image they produce is not**: it aggregates SteVe (**GPL-3.0-or-later**,
 built from an unmodified upstream tag), the Flyway CLI Open Source Edition
-(Apache-2.0), and Eclipse Temurin JREs (GPL-2.0 with Classpath Exception).
+(Apache-2.0), and an Eclipse Temurin JRE (GPL-2.0 with Classpath Exception).
 
 See [NOTICE](NOTICE) for the full breakdown and for how the GPLv3 corresponding
 source requirement is met.

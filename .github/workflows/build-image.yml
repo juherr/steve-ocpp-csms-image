@@ -150,6 +150,35 @@ jobs:
           set -euo pipefail
           docker run --rm --entrypoint curl "${IMAGE}:${STEVE_REF}" --version >/dev/null
 
+      # `flyway version` in the Dockerfile only proves the pruned CLI still
+      # loads — on the Flyway image's own JDK, with no database. This runs the
+      # real entrypoint on the runtime JRE against the build database, which
+      # Maven has just migrated: Flyway must connect through the one driver
+      # kept, find the schema current and hand over to SteVe. The container is
+      # stopped at that hand-over; booting SteVe is not what is being checked.
+      - name: Validate the migration path
+        env:
+          STEVE_REF: ${{ steps.ref.outputs.steve_ref }}
+        run: |
+          set -euo pipefail
+          docker run -d --name steve-migrate-probe --network=host \
+            -e DB_IP=127.0.0.1 -e DB_PASSWORD=changeme \
+            "${IMAGE}:${STEVE_REF}"
+          for i in $(seq 1 30); do
+            if docker logs steve-migrate-probe 2>&1 | grep -q '\[entrypoint\] Starting SteVe'; then
+              docker logs steve-migrate-probe 2>&1 | grep -E '^\[entrypoint\]|^Flyway|^Schema|^Successfully'
+              docker rm -f steve-migrate-probe >/dev/null
+              exit 0
+            fi
+            if [ "$(docker inspect --format '{{ .State.Running }}' steve-migrate-probe)" != "true" ]; then
+              break
+            fi
+            echo "Migration not finished yet ($i/30)…"; sleep 2
+          done
+          docker logs steve-migrate-probe
+          docker rm -f steve-migrate-probe >/dev/null
+          echo "The entrypoint did not reach the SteVe hand-over."; exit 1
+
       - name: Login to GHCR
         if: github.ref_name == 'release'
         env:
@@ -177,5 +206,5 @@ jobs:
       - name: Cleanup
         if: always()
         run: |
-          docker rm -f steve-build-db || true
+          docker rm -f steve-build-db steve-migrate-probe || true
           docker logout ghcr.io || true
