@@ -23,7 +23,7 @@
 # renovate: datasource=github-releases depName=steve-community/steve
 ARG STEVE_REF=steve-3.14.1
 
-FROM eclipse-temurin:25.0.3_9-jdk AS build
+FROM eclipse-temurin:25.0.4_7-jdk AS build
 
 ARG STEVE_REF
 # Host of the throwaway database used by the jOOQ/Flyway code generation during
@@ -84,7 +84,7 @@ RUN find /flyway/drivers -mindepth 1 ! -name 'mariadb-java-client-*.jar' -delete
     && /flyway/flyway version
 
 # --- Runtime stage: JRE + Flyway CLI + migration scripts + the .war -----------
-FROM eclipse-temurin:25.0.3_9-jre
+FROM eclipse-temurin:25.0.4_7-jre
 
 ARG STEVE_REF
 # Build metadata. Without these, the image would silently inherit the base
