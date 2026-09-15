@@ -26,6 +26,7 @@ this repository — if something must change in SteVe, it changes upstream.
 | `.github/workflows/release-drift.yml` | Schedules `hack/release-drift.sh` — see that script for what it compares |
 | `hack/release-drift.sh` | Published image vs the `release` branch; runnable by hand |
 | `hack/release-preflight.sh` | Would releasing HEAD publish anything, or only move a digest; runnable by hand |
+| `hack/migration-test.sh` | Fresh-database migration, restart and upgrade scenarios against the built image; what CI runs after the build, runnable by hand |
 | `README.md` | User-facing documentation |
 | `.github/assets/` | Images referenced by `README.md`; outside the build context |
 | `NOTICE` | License aggregation of the produced image — must stay accurate |
@@ -118,7 +119,10 @@ or swapping a component changes the obligations.
   new SteVe release, and consumers pin by digest.
 - **The image self-migrates at startup.** The build database is thrown away, so
   the runtime database starts empty and `entrypoint.sh` replays Flyway. This is
-  idempotent — it is not redundant work.
+  idempotent — it is not redundant work. CI proves it on every build with
+  `hack/migration-test.sh`: an empty MariaDB, then a second container on the
+  same schema, then the schema written by the previous published release. The
+  build database would prove nothing there — Maven has already migrated it.
 - **`curl` is installed in the runtime stage** on purpose: the documented
   Compose healthcheck shells out to it, and CI asserts it is present.
 - **Merging does not publish; moving `release` does.** Either `git push origin
@@ -231,9 +235,20 @@ it — is a local question, not a CI one:
 dive steve:local   # https://github.com/wagoodman/dive
 ```
 
-A full run also means starting the container against a MariaDB and reaching
-`http://127.0.0.1:8180/steve/manager/signin` — first boot runs the migrations
-and takes up to ~150 s.
+Then the runtime scenarios, exactly as CI runs them after its build — each
+starts its own empty MariaDB, and the container is healthy when the README's
+own healthcheck says so:
+
+```bash
+./hack/migration-test.sh steve:local
+```
+
+A second argument runs the upgrade scenario too. CI resolves it as the highest
+published tag strictly below `ARG STEVE_REF`; by hand, pass any published tag
+(`gh api /users/juherr/packages/container/steve/versions` lists them). A change
+to the script is proven by running it — against `steve:local`, or against a
+published tag when the change does not need a fresh build. On an emulated
+architecture each boot takes ~100 s, so a full run is several minutes.
 
 ## Known state — do not re-diagnose
 
