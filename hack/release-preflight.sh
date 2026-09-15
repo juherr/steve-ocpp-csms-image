@@ -57,15 +57,7 @@ fi
 
 # Already published. Whether shipping again is meaningful depends on the commit
 # it was built from, which the image records and nothing else does.
-config=$(curl -fsS -H "Authorization: Bearer ${token}" \
-  -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \
-  "https://ghcr.io/v2/${REGISTRY_REPO}/manifests/${steve_ref}" \
-  | jq -r '.config.digest // empty') \
-  || die "could not read the manifest of ${steve_ref}"
-[ -n "${config}" ] || die "the manifest of ${steve_ref} carries no config digest"
-
-revision=$(curl -fsSL -H "Authorization: Bearer ${token}" \
-  "https://ghcr.io/v2/${REGISTRY_REPO}/blobs/${config}" \
+revision=$("$(dirname "$0")/image-config.sh" "${steve_ref}" \
   | jq -r '.config.Labels["org.opencontainers.image.revision"] // empty') \
   || die "could not read the image config of ${steve_ref}"
 
