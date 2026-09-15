@@ -193,12 +193,13 @@ jobs:
       # schema must be a Flyway no-op; and the previous published release's
       # schema must be upgraded by this image. The script prints every log on
       # failure. It is the same command as under "Building locally" in the
-      # README, so a red step reproduces on a laptop.
+      # README, so a red step reproduces on a laptop — including the MariaDB
+      # image, which the script reads from DB_IMAGE above rather than being
+      # handed here, so that the path a laptop takes is the path CI tests.
       - name: Migrate a fresh database, restart, upgrade
         env:
           STEVE_REF: ${{ steps.ref.outputs.steve_ref }}
           PREVIOUS_IMAGE: ${{ steps.previous.outputs.previous_image }}
-          MARIADB_IMAGE: ${{ env.DB_IMAGE }}
         run: |
           set -euo pipefail
           ./hack/migration-test.sh "${IMAGE}:${STEVE_REF}" ${PREVIOUS_IMAGE:+"${PREVIOUS_IMAGE}"}
@@ -231,6 +232,6 @@ jobs:
         if: always()
         run: |
           docker rm -f steve-build-db || true
-          docker ps -aq --filter 'name=^steve-it-' | xargs -r docker rm -f || true
-          docker network rm steve-it || true
+          docker ps -aq --filter 'label=steve-it' | xargs -r docker rm -f || true
+          docker network ls -q --filter 'label=steve-it' | xargs -r docker network rm || true
           docker logout ghcr.io || true
