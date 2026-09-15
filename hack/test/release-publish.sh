@@ -66,6 +66,15 @@ run 'a digest that is an index with an attestation is refused' \
   env EXPECTED_REVISION="${revision}" "${publish}" steve-1.0.1 sha256:pub-amd64 sha256:pub-attested-arm64
 expect_status 1 && expect_err 'not hold exactly linux/amd64 and linux/arm64' && expect_untouched && pass
 
+# An index wrapping the one platform manifest, no attestation: it walks to a
+# valid config and merges into exactly the two platforms, so only the check
+# that the index points at the digests *given* can refuse it — what it would
+# publish is not what the build job handed over.
+reset_log
+run 'a digest that is an index wrapping one platform is refused' \
+  env EXPECTED_REVISION="${revision}" "${publish}" steve-1.0.1 sha256:pub-amd64 sha256:pub-wrapped-arm64
+expect_status 1 && expect_err 'would not point at the two digests given' && expect_untouched && pass
+
 reset_log
 run 'a digest with an empty label is refused' \
   env EXPECTED_REVISION="${revision}" "${publish}" steve-1.0.1 sha256:pub-nocreated-amd64 sha256:pub-arm64
