@@ -58,17 +58,18 @@ printf 'ARG STEVE_REF=steve-1.0.1\n' > "${repo}/Dockerfile"
 failed=0
 out='' err='' status=0
 
-# run <name> <command...>: captures stdout, stderr and the exit status.
+# run <name> <command...>: captures stdout, stderr and the exit status. Every
+# command runs from the throwaway repository, where the callers read the
+# Dockerfile and git, and without the GitHub Actions variables — under them
+# drift would write to the real step summary and format its warning as an
+# annotation.
 run() {
   name="$1"; shift
   set +e
-  out=$("$@" 2>"${work}/stderr"); status=$?
+  out=$(cd "${repo}" && env -u GITHUB_ACTIONS -u GITHUB_STEP_SUMMARY "$@" 2>"${work}/stderr"); status=$?
   set -e
   err=$(cat "${work}/stderr")
 }
-# in_repo <command...>: the callers read the Dockerfile and git from the cwd.
-# shellcheck disable=SC2329  # reached through run(), which shellcheck cannot see
-in_repo() { (cd "${repo}" && env -u GITHUB_ACTIONS -u GITHUB_STEP_SUMMARY "$@"); }
 
 pass() { printf 'ok   %s\n' "${name}"; }
 fail() { printf 'FAIL %s: %s\n  stdout: %s\n  stderr: %s\n' "${name}" "$1" "${out}" "${err}"; failed=1; }
@@ -128,21 +129,21 @@ expect_helper_failure 'usage' && pass
 # --- callers ----------------------------------------------------------------
 
 run 'preflight reads through an index; identical packaging means nothing to ship' \
-  in_repo "${preflight}"
+  "${preflight}"
 expect_status 1 && expect_err "built from ${revision}" && pass
 
 run 'drift reads through an index and finds release in sync' \
-  in_repo "${drift}"
+  "${drift}"
 expect_status 0 && expect_out "In sync: steve-1.0.1 was built from ${revision}" && pass
 
 printf 'ARG STEVE_REF=steve-1.0.3\n' > "${repo}/Dockerfile"
 
 run 'preflight fails closed when the helper cannot resolve the tag' \
-  in_repo env REGISTRY_REPO=juherr/broken "${preflight}"
+  env REGISTRY_REPO=juherr/broken "${preflight}"
 expect_status 2 && expect_err 'CANNOT TELL' && expect_err 'image-config:' && pass
 
 run 'drift warns and exits 0 when the helper cannot resolve the tag' \
-  in_repo env REGISTRY_REPO=juherr/broken "${drift}"
+  env REGISTRY_REPO=juherr/broken "${drift}"
 expect_status 0 && expect_err 'WARNING: Could not read the image config of steve-1.0.3' && pass
 
 printf 'ARG STEVE_REF=steve-1.0.1\n' > "${repo}/Dockerfile"
