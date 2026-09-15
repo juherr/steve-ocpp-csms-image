@@ -70,14 +70,7 @@ if [ -z "${tag}" ]; then
   exit 0
 fi
 
-config=$(curl -fsS -H "Authorization: Bearer ${token}" \
-  -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \
-  "https://ghcr.io/v2/${REGISTRY_REPO}/manifests/${tag}" | jq -r .config.digest) \
-  || bail "Could not read the manifest of ${tag} — skipping the drift check."
-usable "${config}" || bail "The manifest of ${tag} carries no config digest — skipping the drift check."
-
-published=$(curl -fsSL -H "Authorization: Bearer ${token}" \
-  "https://ghcr.io/v2/${REGISTRY_REPO}/blobs/${config}" \
+published=$("$(dirname "$0")/image-config.sh" "${tag}" \
   | jq -r '.config.Labels["org.opencontainers.image.revision"] // empty') \
   || bail "Could not read the image config of ${tag} — skipping the drift check."
 

@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 2,
+  "mediaType": "application/vnd.docker.distribution.manifest.list.v2+json",
+  "manifests": [
+    { "mediaType": "application/vnd.oci.image.manifest.v1+json", "size": 1, "digest": "sha256:attest-arm64",
+      "platform": { "architecture": "unknown", "os": "unknown" },
+      "annotations": { "vnd.docker.reference.digest": "sha256:arm64", "vnd.docker.reference.type": "attestation-manifest" } },
+    { "mediaType": "application/vnd.oci.image.manifest.v1+json", "size": 1, "digest": "sha256:arm64",
+      "platform": { "architecture": "arm64", "os": "linux" } },
+    { "mediaType": "application/vnd.oci.image.manifest.v1+json", "size": 1, "digest": "sha256:s390x",
+      "platform": { "architecture": "s390x", "os": "linux" } }
+  ]
+}

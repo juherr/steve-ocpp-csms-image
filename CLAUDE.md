@@ -13,12 +13,13 @@ descriptions — in English.
 
 ## Verification has a real cost here
 
-There is no unit test suite. The meaningful checks are a full `docker build`,
-which clones SteVe and runs Maven against a live MariaDB (~2 min on CI, longer
-locally), and `hack/migration-test.sh` on the result, which boots the image
-against an empty MariaDB, boots it again on the schema that left behind, and —
-given a previous release as second argument — on a schema that release wrote.
-So:
+The one unit test suite is `hack/test/registry-readers.sh`, and it covers the
+registry readers alone, offline, against fixtures. For the image itself the
+meaningful checks are a full `docker build`, which clones SteVe and runs Maven
+against a live MariaDB (~2 min on CI, longer locally), and
+`hack/migration-test.sh` on the result, which boots the image against an empty
+MariaDB, boots it again on the schema that left behind, and — given a previous
+release as second argument — on a schema that release wrote. So:
 
 - Never claim a change to the `Dockerfile` or the workflow is "verified" without
   having actually built. Say what you ran and what you did not.
@@ -54,12 +55,14 @@ Reading the labels of a published tag without pulling it:
 
 ```bash
 TAG=$(sed -n 's/^ARG STEVE_REF=//p' Dockerfile)   # or any tag already published
-TOKEN=$(curl -s "https://ghcr.io/token?scope=repository:juherr/steve:pull&service=ghcr.io" | jq -r .token)
-CFG=$(curl -s -H "Authorization: Bearer $TOKEN" \
-  -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \
-  "https://ghcr.io/v2/juherr/steve/manifests/$TAG" | jq -r .config.digest)
-curl -sL -H "Authorization: Bearer $TOKEN" "https://ghcr.io/v2/juherr/steve/blobs/$CFG" | jq '.config.Labels'
+./hack/image-config.sh "$TAG" | jq '.config.Labels'
 ```
+
+The helper walks an image index down to its `linux/amd64` manifest, so this
+reads the labels whether the tag is a single manifest or an index;
+`REGISTRY_REPO=` points it at another package. It is the same code path
+`release-preflight.sh` and `release-drift.sh` read through — do not retype its
+`curl` calls into a recipe of their own.
 
 ## Tooling
 
