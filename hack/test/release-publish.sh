@@ -26,7 +26,7 @@ publish="${HACK_DIR}/publish-index.sh"
 setup_fixtures
 
 # The record fake-docker keeps of every `imagetools create -t`.
-created() { grep -c '^create -t ' "${FAKE_DOCKER}/log" 2>/dev/null || true; }
+created() { if [ -f "${FAKE_DOCKER}/log" ]; then grep -c '^create -t ' "${FAKE_DOCKER}/log" || true; else echo 0; fi; }
 reset_log() { rm -f "${FAKE_DOCKER}/log"; }
 expect_published() {
   [ "$(created)" -eq 1 ] || { fail "expected exactly one create -t, got $(created)"; return 1; }
@@ -56,9 +56,14 @@ run 'a digest built from another commit is refused' \
 expect_status 1 && expect_err "carries revision '0000000000000000000000000000000000000000'" && expect_untouched && pass
 
 reset_log
+run 'a digest of the wrong architecture is refused' \
+  env EXPECTED_REVISION="${revision}" "${publish}" steve-1.0.1 sha256:pub-amd64 sha256:pub-amd64
+expect_status 1 && expect_err 'is not a linux/arm64 image' && expect_untouched && pass
+
+reset_log
 run 'a digest that is an index with an attestation is refused' \
   env EXPECTED_REVISION="${revision}" "${publish}" steve-1.0.1 sha256:pub-amd64 sha256:pub-attested-arm64
-expect_status 1 && expect_err 'does not hold exactly linux/amd64 and linux/arm64' && expect_untouched && pass
+expect_status 1 && expect_err 'not hold exactly linux/amd64 and linux/arm64' && expect_untouched && pass
 
 reset_log
 run 'a digest with an empty label is refused' \

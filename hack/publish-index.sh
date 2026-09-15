@@ -41,24 +41,43 @@ export REGISTRY_REPO="${IMAGE#ghcr.io/}"
 die() { printf 'publish-index: %s\n' "$1" >&2; exit 1; }
 summary() { cat >>"${GITHUB_STEP_SUMMARY:-/dev/null}"; }
 
-docker buildx imagetools create -t "${IMAGE}:${tag}" "${IMAGE}@${amd64}" "${IMAGE}@${arm64}"
-
-published=$(docker buildx imagetools inspect "${IMAGE}:${tag}" --format '{{ json .Manifest }}') \
-  || die "could not read back ${IMAGE}:${tag}"
-jq -e '[.manifests[].platform | "\(.os)/\(.architecture)"] | sort == ["linux/amd64", "linux/arm64"]' \
-  <<<"${published}" >/dev/null \
-  || die "${IMAGE}:${tag} does not hold exactly linux/amd64 and linux/arm64: $(jq -c '[.manifests[].platform]' <<<"${published}")"
-
+# Everything is checked on the candidate, before the tag exists: the two
+# digests as the registry holds them, then the index they would merge into —
+# `--dry-run` prints it and pushes nothing. A refusal below therefore leaves
+# `${IMAGE}:${tag}` exactly where it was, which for a re-release is the
+# previous image and for a first release is nowhere.
 for arch in amd64 arm64; do
   digest_var="${arch}"; digest="${!digest_var}"
   config=$(IMAGE_ARCH="${arch}" "$(dirname "$0")/image-config.sh" "${digest}") \
     || die "could not read the image config of ${digest}"
+  jq -e --arg arch "${arch}" '.os == "linux" and .architecture == $arch' <<<"${config}" >/dev/null \
+    || die "${digest} is not a linux/${arch} image: $(jq -c '{os, architecture}' <<<"${config}")"
   jq -e '.config.Labels | to_entries | all(.value != "")' <<<"${config}" >/dev/null \
     || die "an empty label on linux/${arch} (${digest})"
   revision=$(jq -r '.config.Labels["org.opencontainers.image.revision"] // empty' <<<"${config}")
   [ "${revision}" = "${EXPECTED_REVISION}" ] \
     || die "linux/${arch} (${digest}) carries revision '${revision}', expected ${EXPECTED_REVISION}"
 done
+
+candidate=$(docker buildx imagetools create --dry-run "${IMAGE}@${amd64}" "${IMAGE}@${arm64}") \
+  || die "could not compute the index of ${amd64} and ${arm64}"
+jq -e '[.manifests[].platform | "\(.os)/\(.architecture)"] | sort == ["linux/amd64", "linux/arm64"]' \
+  <<<"${candidate}" >/dev/null \
+  || die "the index would not hold exactly linux/amd64 and linux/arm64: $(jq -c '[.manifests[].platform]' <<<"${candidate}")"
+jq -e --arg amd64 "${amd64}" --arg arm64 "${arm64}" \
+  '[.manifests[].digest] | sort == ([$amd64, $arm64] | sort)' <<<"${candidate}" >/dev/null \
+  || die "the index would not point at the two digests given: $(jq -c '[.manifests[].digest]' <<<"${candidate}")"
+
+docker buildx imagetools create -t "${IMAGE}:${tag}" "${IMAGE}@${amd64}" "${IMAGE}@${arm64}"
+
+# Read back: the tag must now resolve to the candidate that was checked. A
+# mismatch here is a registry-side surprise and exits 1 with the tag already
+# moved, which is why it is said in so many words.
+published=$(docker buildx imagetools inspect "${IMAGE}:${tag}" --format '{{ json .Manifest }}') \
+  || die "could not read back ${IMAGE}:${tag} — the tag has been created, check it by hand"
+if [ "$(jq -cS '.manifests' <<<"${published}")" != "$(jq -cS '.manifests' <<<"${candidate}")" ]; then
+  die "${IMAGE}:${tag} was created but does not read back as the candidate that was checked: $(jq -c '.manifests' <<<"${published}")"
+fi
 
 index=$(docker buildx imagetools inspect "${IMAGE}:${tag}" --format '{{ .Manifest.Digest }}')
 echo "Pushed: ${IMAGE}:${tag} (linux/amd64, linux/arm64)"
