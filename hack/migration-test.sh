@@ -14,13 +14,14 @@
 # migration of steve#956, which a Maven-migrated build database never runs.
 # An image built here would carry such a regression straight to the registry.
 #
-# Three scenarios, each against a MariaDB started empty by this script:
+# Three scenarios on two MariaDB instances, both started empty by this script:
 #
 #   fresh    the image migrates an empty database and SteVe becomes healthy
-#   restart  a second container on that database is a Flyway no-op, healthy
-#   upgrade  PREVIOUS_IMAGE migrates an empty database, then IMAGE takes over
-#            the same database and SteVe becomes healthy (needs a second
-#            argument; skipped with a notice otherwise)
+#   restart  a second container on that same, now migrated, database is a
+#            Flyway no-op and healthy
+#   upgrade  PREVIOUS_IMAGE migrates the second empty database, then IMAGE
+#            takes over that database and SteVe becomes healthy (needs a
+#            second argument; skipped with a notice otherwise)
 #
 # "Healthy" is the README's own Compose healthcheck command, set on the
 # container and polled through `docker inspect` — not a log marker. It doubles

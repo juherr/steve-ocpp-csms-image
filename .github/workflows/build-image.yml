@@ -184,6 +184,23 @@ jobs:
           fi
           echo "previous_image=${previous:+${IMAGE}:${previous}}" >> "$GITHUB_OUTPUT"
 
+      # The script's failure path is what makes a red step readable, and the
+      # Cleanup step below would hide a cleanup bug in it. So first, a forced
+      # failure: a container that exits at once (alpine with no command, image
+      # already present from the probe above) must fail the script, print the
+      # database's log, and leave nothing behind — checked here, before the
+      # fallback cleanup gets a chance to. Seconds, since nothing boots.
+      - name: Check migration-test.sh fails loudly and leaves nothing behind
+        run: |
+          set -euo pipefail
+          if out=$(./hack/migration-test.sh alpine 2>&1); then
+            echo "migration-test.sh passed a container that exits at once"; exit 1
+          fi
+          grep -q 'FAIL: .* exited before becoming healthy' <<<"${out}"
+          grep -q 'docker logs steve-it-.*-db' <<<"${out}"
+          [ -z "$(docker ps -aq --filter 'label=steve-it')" ] || { echo "containers left behind"; exit 1; }
+          [ -z "$(docker network ls -q --filter 'label=steve-it')" ] || { echo "network left behind"; exit 1; }
+
       # `flyway version` in the Dockerfile only proves the pruned CLI still
       # loads — on the Flyway image's own JDK, with no database. Everything
       # else is this: the real entrypoint on the runtime JRE, through the one

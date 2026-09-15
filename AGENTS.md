@@ -235,9 +235,11 @@ it — is a local question, not a CI one:
 dive steve:local   # https://github.com/wagoodman/dive
 ```
 
-Then the runtime scenarios, exactly as CI runs them after its build — each
-starts its own empty MariaDB, and the container is healthy when the README's
-own healthcheck says so:
+Then the runtime scenarios, exactly as CI runs them after its build: an empty
+MariaDB is migrated, a second container reuses the migrated schema, and the
+upgrade scenario starts a second empty MariaDB for the previous release to
+write first. A container is healthy when the README's own healthcheck command
+says so:
 
 ```bash
 ./hack/migration-test.sh steve:local
