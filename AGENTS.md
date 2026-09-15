@@ -19,16 +19,18 @@ this repository — if something must change in SteVe, it changes upstream.
 | `Dockerfile` | 3 stages: build the `.war`, extract the Flyway CLI, assemble the runtime image |
 | `entrypoint.sh` | Runs Flyway migrations against the runtime database, then starts the `.war` |
 | `flyway-callbacks/afterConnect.sql` | Forces `default_storage_engine=InnoDB`; replaces `-initSql`, removed in Flyway 13 |
-| `.github/workflows/build-image.yml` | Build & push to GHCR — see its `on:` block for the triggers |
-| `.github/workflows/lint.yml` | hadolint / shellcheck / actionlint, and `hack/test/registry-readers.sh` |
+| `.github/workflows/build-image.yml` | One native build and probe per architecture, merged into an index on `release` — see its `on:` block for the triggers |
+| `.github/workflows/lint.yml` | hadolint / shellcheck / actionlint, and the two suites under `hack/test/` |
 | `.github/workflows/scan-published.yml` | Weekly Trivy scan of the tags already on GHCR |
 | `.github/workflows/release.yml` | The release, from the Actions tab: preflight, fast-forward `release`, start the build |
 | `.github/workflows/release-drift.yml` | Schedules `hack/release-drift.sh` — see that script for what it compares |
 | `hack/release-drift.sh` | Published image vs the `release` branch; runnable by hand |
 | `hack/release-preflight.sh` | Would releasing HEAD publish anything, or only move a digest; runnable by hand |
 | `hack/migration-test.sh` | Fresh-database migration, restart and upgrade scenarios against the built image; what CI runs after the build, runnable by hand |
-| `hack/image-config.sh` | Image config of a published tag, single manifest or index; what `release-drift.sh`, `release-preflight.sh` and the `CLAUDE.md` recipe read through |
-| `hack/test/` | Offline tests of `image-config.sh` and its two callers, against a fixture registry served by a `curl` shim |
+| `hack/image-config.sh` | Image config of a published tag, single manifest or index; what `release-drift.sh`, `release-preflight.sh`, the two scripts below and the `CLAUDE.md` recipe read through |
+| `hack/check-pushed-digest.sh` | Is the digest a build job pushed the image it probed; run by each build job on `release` |
+| `hack/publish-index.sh` | Checks the two platform digests and the index they would form, then makes the tag and prints the digest to pin; run by the `publish` job on `release` |
+| `hack/test/` | Offline tests of the five scripts above that read the registry, against a fixture registry served by a `curl` shim and a `docker` that records instead of acting |
 | `README.md` | User-facing documentation |
 | `.github/assets/` | Images referenced by `README.md`; outside the build context |
 | `NOTICE` | License aggregation of the produced image — must stay accurate |
@@ -45,12 +47,18 @@ not secrets — do not treat their presence as a vulnerability, and do not try t
 
 **The build needs a live MariaDB.** jOOQ code generation and Flyway both read a
 real schema during `mvn package`. CI starts a throwaway MariaDB publishing 3306
-and builds with `--network=host`, pointing `--build-arg DB_IP=127.0.0.1`.
-BuildKit only accepts `host`, `none` or `default` for `--network`, so a
-dedicated Docker network is **not** an option (the legacy builder that allowed
-one is deprecated since Engine 23). Use `127.0.0.1`, never `localhost`: in the
-host namespace `localhost` may resolve to `::1` first while MariaDB listens on
-IPv4.
+on **each** runner and builds through a `docker-container` builder created with
+`--driver-opt network=host`, pointing `--build-arg DB_IP=127.0.0.1`: buildkitd
+itself sits on the runner's network, so the `RUN` steps reach the database with
+no `--network` flag and no entitlement. The alternative that looks equivalent
+is not: the `network.host` entitlement plus `--network=host` puts the `RUN`
+steps in the buildkitd *container's* namespace, and Maven got "connection
+refused" on 127.0.0.1 on both runners (measured, #27). A dedicated Docker
+network was never an option with the default driver (BuildKit accepts only
+`host`, `none` or `default` for `--network`) and has not been measured with
+the container driver — do not claim it either way. Use `127.0.0.1`, never
+`localhost`: on the host network `localhost` may resolve to `::1` first while
+MariaDB listens on IPv4.
 
 **OCI labels must keep reaching the final image.** The
 `org.opencontainers.image.*` labels live in the `Dockerfile` runtime stage, and
@@ -100,31 +108,53 @@ or swapping a component changes the obligations.
 
 ## Deliberate choices — do not "improve" them
 
-- **Manual `docker build` / `docker push`**, no `docker/metadata-action`, no
-  `docker/build-push-action`, no `docker/setup-buildx-action`. Labels are in the
-  `Dockerfile`, which keeps them identical for local and CI builds. Verified
-  present on the published image — `metadata-action` would add a second source
-  of truth for no gain.
+- **Manual `docker buildx build` / `imagetools create`**, no
+  `docker/metadata-action`, no `docker/build-push-action`, no
+  `docker/setup-buildx-action`. Labels are in the `Dockerfile`, which keeps
+  them identical for local and CI builds. Verified present on the published
+  image — `metadata-action` would add a second source of truth for no gain.
+  The builder is one `docker buildx create` line, the same one the README
+  runs locally; `setup-buildx-action` would create it with a different
+  network, and its documented way to host networking is the entitlement that
+  was measured to be the wrong namespace.
 
-  Note this is *not* "we avoid BuildKit": `docker build` on Engine 23+ already
-  builds with BuildKit through the default `docker` driver. What is avoided is
-  the `docker-container` driver that `setup-buildx-action` sets up, because the
-  build needs `--network=host` to reach the throwaway MariaDB, and under that
-  driver host networking means the buildkitd container's namespace and needs the
-  `network.host` entitlement. The features it would unlock — multi-arch, and
-  SBOM/provenance attestations attached to the image — are the ones already
-  ruled out below.
-- **Single architecture (`linux/amd64`).** Multi-arch would require QEMU plus a
-  MariaDB reachable from each emulated build; not worth it today.
+  A `docker-container` builder *is* used — one created on the host network,
+  see the invariant above — because the default `docker` driver refuses
+  push-by-digest, and pushing each architecture by digest is what lets one tag
+  be assembled from two runners. Of the features that driver unlocks,
+  multi-arch is now taken; attestations remain ruled out: the export passes
+  `--provenance=false`, without which each pushed platform digest is itself a
+  small index and the merged tag shows two `unknown/unknown` entries next to
+  the platforms (measured).
+- **Two architectures, built natively, merged into one index.** `linux/amd64`
+  on `ubuntu-latest`, `linux/arm64` on `ubuntu-24.04-arm`, each job with its
+  own throwaway MariaDB, build and probes; on `release` each pushes its image
+  by digest and a `publish` job merges the two with `docker buildx imagetools
+  create`. Route B of #27, measured against route A (a container-driver build
+  with QEMU emulating only the runtime stage): A is one job instead of two,
+  but Maven, jOOQ and the migration scenarios never run on arm64 under it, and
+  an arm64 breakage would not fail a pull request. B costs two MariaDBs, two
+  builds of ~3–4 min running in parallel — the wall-clock of the old single
+  job — and a merge job of seconds. Each job builds once with `--load`,
+  probes that image, then exports the *same* build by digest — a cache hit of
+  seconds, and checked: the layers of the pushed manifest must be the probed
+  image's, read back through `hack/image-config.sh`. The buildkit image the
+  builder pulls is not pinned, like the runner's Engine and buildx: a build
+  tool, not a component of the image.
 - **One tag per upstream release, `steve-X.Y.Z`.** No `latest`, no per-commit
-  tag, and no JRE-suffixed variant: the JRE is a build detail, a bump is not a
-  new SteVe release, and consumers pin by digest.
+  tag, no per-architecture tag, and no JRE-suffixed variant: the JRE is a
+  build detail, a bump is not a new SteVe release, and consumers pin by
+  digest — the index's, which the `publish` job prints.
 - **The image self-migrates at startup.** The build database is thrown away, so
   the runtime database starts empty and `entrypoint.sh` replays Flyway. This is
-  idempotent — it is not redundant work. CI proves it on every build with
-  `hack/migration-test.sh`: an empty MariaDB, then a second container on the
-  same schema, then the schema written by the previous published release. The
-  build database would prove nothing there — Maven has already migrated it.
+  idempotent — it is not redundant work. CI proves it on every build, on each
+  architecture natively, with `hack/migration-test.sh`: an empty MariaDB, then
+  a second container on the same schema, then the schema written by the
+  previous published release. The build database would prove nothing there —
+  Maven has already migrated it. The upgrade scenario asks
+  `hack/image-config.sh` for the runner's own architecture first, and is
+  skipped with a notice on a runner the previous tag was never built for —
+  the arm64 job of the first multi-arch release, and nothing after it.
 - **`curl` is installed in the runtime stage** on purpose: the documented
   Compose healthcheck shells out to it, and CI asserts it is present.
 - **Merging does not publish; moving `release` does.** Either `git push origin
@@ -158,8 +188,9 @@ or swapping a component changes the obligations.
   failing would only block a release no worse than what is already out there.
 - **No SBOM.** A `syft` SBOM was tried and removed: as a workflow artifact it
   expires and no consumer can discover it, and attaching it to the image needs
-  buildx attestations. `NOTICE` covers the licence-aggregation need in the form
-  a human actually reads.
+  buildx attestations — the `--provenance=false` on the export is the same
+  decision. `NOTICE` covers the licence-aggregation need in the form a human
+  actually reads.
 - **No `dive` step.** It cannot fail (its efficiency thresholds are not a
   contract worth holding this image to), so in CI it decides nothing. It is a
   local investigation tool — the command is under "Verifying a change".
@@ -192,12 +223,19 @@ prefer arrays to space-separated strings when a command takes a path list.
 
 The linters are the cheap gate. Run the three steps of
 `.github/workflows/lint.yml` — that file pins the images, so copying the
-commands here would only create a second version to keep in sync — and
-`./hack/test/registry-readers.sh`, which is the whole test suite: the registry
-readers against a fixture registry, no network. A change to
-`hack/image-config.sh` or to either script that reads through it is not
-verified until that passes; a new manifest shape the readers must handle goes
-in as a fixture under `hack/test/registry/` first.
+commands here would only create a second version to keep in sync — and the
+two suites under `hack/test/`, which are the whole test suite, no network:
+`registry-readers.sh` for `image-config.sh` and the two release readers, and
+`release-publish.sh` for the two scripts that run only on `release` —
+`check-pushed-digest.sh` in each build job and `publish-index.sh` in the
+`publish` job. The second suite is the only recurring coverage of the
+publish path, which no pull request exercises: a `docker` shim records every
+`imagetools create -t`, and the suite proves that a candidate failing a check
+never reaches one. A change to any of those five scripts is not verified
+until both suites pass; a new manifest shape goes in as a fixture under
+`hack/test/registry/` first. What has no offline test is the push-by-digest
+export itself — it needs buildx and a registry, and rests on the #27 spike
+and a local `registry:2` run.
 
 A change to a pin — or to a file holding one — is proven by making Renovate say
 so, not by reading `renovate.json`. `--platform=local` runs on the working
@@ -228,10 +266,17 @@ docker run --rm --entrypoint curl steve:local --version                  # healt
 docker inspect steve:local --format '{{ .Config.User }}'                 # 10001:10001
 ```
 
-Against the published image:
+Those three read the image `--load` put in the daemon, which is the one the
+probes ran against; `docker buildx rm steve-builder` afterwards, or the next
+run of the README block fails on the name.
+
+Against the published image — an index of exactly two entries, `linux/amd64`
+and `linux/arm64`, and the labels of each platform manifest:
 
 ```bash
-docker buildx imagetools inspect "ghcr.io/juherr/steve:$(sed -n 's/^ARG STEVE_REF=//p' Dockerfile)"
+REF="ghcr.io/juherr/steve:$(sed -n 's/^ARG STEVE_REF=//p' Dockerfile)"
+docker buildx imagetools inspect "$REF"
+docker buildx imagetools inspect "$REF" --format '{{ json .Image }}' | jq 'map_values(.config.Labels)'
 ```
 
 When the image grows unexpectedly, the layer-by-layer breakdown — what each

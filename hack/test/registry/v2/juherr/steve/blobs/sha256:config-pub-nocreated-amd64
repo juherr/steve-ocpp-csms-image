@@ -1,0 +1,24 @@
+{
+  "architecture": "amd64",
+  "os": "linux",
+  "config": {
+    "Labels": {
+      "org.opencontainers.image.created": "",
+      "org.opencontainers.image.description": "SteVe OCPP Central System, compiled at build time from an unmodified upstream release tag.",
+      "org.opencontainers.image.documentation": "https://github.com/juherr/steve-ocpp-csms-image#readme",
+      "org.opencontainers.image.licenses": "GPL-3.0-or-later",
+      "org.opencontainers.image.revision": "@REVISION@",
+      "org.opencontainers.image.source": "https://github.com/juherr/steve-ocpp-csms-image",
+      "org.opencontainers.image.title": "SteVe (OCPP CSMS)",
+      "org.opencontainers.image.url": "https://github.com/juherr/steve-ocpp-csms-image",
+      "org.opencontainers.image.version": "steve-1.0.1"
+    }
+  },
+  "rootfs": {
+    "type": "layers",
+    "diff_ids": [
+      "sha256:diff-amd64-1",
+      "sha256:diff-amd64-2"
+    ]
+  }
+}

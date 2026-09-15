@@ -5,15 +5,26 @@
 # public, so a pull request from a fork would otherwise execute arbitrary code
 # on our own machine. Hosted runners are free and unlimited on public repos.
 #
-# SteVe runs its jOOQ code generation and its Flyway migrations against a LIVE
-# database during `mvn package`. We therefore start a throwaway MariaDB that
-# publishes 3306 on the runner, and build with `--network=host` so the RUN steps
-# share the runner's network namespace and reach it on 127.0.0.1.
+# One build per architecture, each native on its own runner (`ubuntu-latest`
+# for amd64, `ubuntu-24.04-arm` for arm64), probed there, and — on `release` —
+# pushed by digest; the `publish` job then merges the two digests into the one
+# `steve-X.Y.Z` tag, an image index. Route B of #27, measured before being
+# chosen: emulating arm64 on the amd64 runner would have been one job instead
+# of two, but Maven, jOOQ and the migration scenarios would never have run on
+# arm64, and an arm64 breakage would not have failed a pull request.
 #
-# Why not a dedicated Docker network: BuildKit only accepts host/none/default
-# for `--network`. The legacy builder (DOCKER_BUILDKIT=0) did accept a custom
-# network, but it has been deprecated since Engine 23 — we stay on the supported
-# path. See the README for the exact same commands, runnable locally.
+# SteVe runs its jOOQ code generation and its Flyway migrations against a LIVE
+# database during `mvn package`. Each job therefore starts a throwaway MariaDB
+# that publishes 3306 on its runner, and builds through a `docker-container`
+# builder created with `--driver-opt network=host`: buildkitd itself sits on
+# the runner's network, so the RUN steps reach the database on 127.0.0.1 with
+# no `--network` flag. Why that builder and not the daemon's default one: the
+# `docker` driver refuses push-by-digest ("not implemented for docker driver",
+# measured), and pushing by digest is what lets one tag be assembled from two
+# runners. Why not the `network.host` entitlement instead: under it,
+# `--network=host` means the buildkitd *container's* namespace — Maven got
+# "connection refused" on 127.0.0.1 on both runners. See the README for the
+# exact same commands, runnable locally.
 #
 # No secret ever enters the image: sensitive configuration is injected at
 # runtime through environment variables (Spring externalized config).
@@ -40,8 +51,9 @@ on:
   # Select the `release` branch when dispatching; the publish steps below refuse
   # to run from anywhere else.
   workflow_dispatch:
-  # Pull requests run the whole build, minus the login and the push: it is the
-  # only thing standing between an unbuildable change and `main`.
+  # Pull requests run the whole build on both architectures, minus the login,
+  # the push and the merge: it is the only thing standing between an
+  # unbuildable change and `main`.
   pull_request:
     paths:
       - "Dockerfile"
@@ -49,6 +61,9 @@ on:
       - "entrypoint.sh"
       - "flyway-callbacks/**"
       - "hack/migration-test.sh"
+      - "hack/image-config.sh"
+      - "hack/check-pushed-digest.sh"
+      - "hack/publish-index.sh"
       - ".github/workflows/build-image.yml"
 
 permissions:
@@ -70,12 +85,34 @@ env:
   # only serve the build: no data, no secret, nothing of it reaches the image.
   # renovate: datasource=docker depName=mariadb
   DB_IMAGE: "mariadb:11.8"
+  # The builder every `docker buildx build` below goes through. Its buildkit
+  # image is deliberately not pinned: it is a build tool, like the runner's
+  # Engine and buildx, which were never pinned either — not a component of the
+  # image, whose base images are.
+  BUILDER: steve-builder
 
 jobs:
   build:
-    name: build & push
-    runs-on: ubuntu-latest
+    name: build & probe (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
+    strategy:
+      # A pull request must report both architectures, not stop at the first.
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            arch: amd64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+    env:
+      ARCH: ${{ matrix.arch }}
+    # Each job writes only its own digest_<arch>; the other key stays unset in
+    # that job, and GitHub merges the two — measured on the #27 spike.
+    outputs:
+      steve_ref: ${{ steps.ref.outputs.steve_ref }}
+      digest_amd64: ${{ steps.digest.outputs.digest_amd64 }}
+      digest_arm64: ${{ steps.digest.outputs.digest_arm64 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
@@ -83,6 +120,14 @@ jobs:
       # pinned in code, so the version a branch would ship and the version its
       # build tests cannot disagree. Validated against a strict format before it
       # reaches any shell command below.
+      #
+      # BUILD_DATE is fixed here, once per job: it feeds a LABEL, and the
+      # push-by-digest export at the end must be a cache hit of the build that
+      # was probed, which it is only with identical inputs.
+      #
+      # The runner label is asserted against the architecture it is supposed
+      # to be, so a label that quietly changed meaning fails here and not as a
+      # wrong platform inside the published index.
       - name: Resolve and validate the SteVe tag
         id: ref
         run: |
@@ -91,7 +136,12 @@ jobs:
           if ! printf '%s' "$ref" | grep -Eq '^steve-[0-9]+\.[0-9]+\.[0-9]+$'; then
             echo "Invalid ARG STEVE_REF in Dockerfile: '$ref' (expected steve-X.Y.Z)"; exit 1
           fi
+          actual=$(docker version --format '{{ .Server.Arch }}')
+          if [ "${actual}" != "${ARCH}" ]; then
+            echo "This runner is ${actual}, the matrix says ${ARCH}."; exit 1
+          fi
           echo "steve_ref=$ref" >> "$GITHUB_OUTPUT"
+          echo "build_date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
 
       # Published on 0.0.0.0 rather than the loopback so that the documented
       # fallback (`--add-host …:host-gateway`, no host networking) also works
@@ -120,28 +170,40 @@ jobs:
           done
           echo "Timeout: the build database never became ready."; exit 1
 
+      # See the header for why this builder. `--bootstrap` starts buildkitd
+      # now, so that a builder that cannot come up fails here, by name.
+      - name: Create the builder
+        run: |
+          set -euo pipefail
+          docker buildx create --name "${BUILDER}" --driver docker-container --driver-opt network=host
+          docker buildx inspect --bootstrap --builder "${BUILDER}"
+
       # Fails in seconds with a clear message instead of after eight minutes of
-      # Maven, should the build sandbox not reach the database.
+      # Maven, should the build sandbox not reach the database. Through the
+      # same builder as the build, or it would probe a path the build does not
+      # take.
       - name: Probe build sandbox networking
         run: |
           set -euo pipefail
           printf 'FROM alpine\nRUN nc -z -w3 127.0.0.1 3306 && echo REACHABLE\n' \
-            | docker build --network=host --progress=plain -
+            | docker buildx build --builder "${BUILDER}" --progress=plain -
 
+      # `--load` puts the result in the daemon, where the probes below run it.
+      # 127.0.0.1 and not localhost: on the host network localhost may resolve
+      # to ::1 first, while the published MariaDB listens on IPv4.
       - name: Build the image
         env:
           STEVE_REF: ${{ steps.ref.outputs.steve_ref }}
+          BUILD_DATE: ${{ steps.ref.outputs.build_date }}
         run: |
           set -euo pipefail
-          # 127.0.0.1 and not localhost: in the host network namespace localhost
-          # may resolve to ::1 first, while the published MariaDB listens on IPv4.
-          docker build \
-            --network=host \
+          docker buildx build \
+            --builder "${BUILDER}" \
             --build-arg STEVE_REF="${STEVE_REF}" \
             --build-arg DB_IP=127.0.0.1 \
-            --build-arg BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --build-arg BUILD_DATE="${BUILD_DATE}" \
             --build-arg VCS_REF="${GITHUB_SHA}" \
-            -t "${IMAGE}:${STEVE_REF}" \
+            --load -t "${IMAGE}:${STEVE_REF}" \
             .
 
       # The recommended Compose healthcheck shells out to curl inside the
@@ -163,6 +225,15 @@ jobs:
       # the very first release — skips the scenario with a notice, never
       # silently. GHCR unreachable fails the step: a check that quietly drops
       # its coverage is worse than a re-run.
+      #
+      # Then, does that tag exist for this runner's architecture? Releases
+      # before the first multi-arch one are amd64 only, and `docker run` of
+      # an amd64 image on the arm64 runner would fail with an exec format
+      # error, not with a migration finding. The helper answers for the
+      # runner's own architecture; a tag that lacks it answers with another
+      # one, and the scenario is skipped on this runner with a notice. The
+      # amd64 runner still runs it, and from the second multi-arch release on
+      # both do.
       - name: Resolve the previous published release
         id: previous
         env:
@@ -181,16 +252,23 @@ jobs:
           if [ -z "${previous}" ]; then
             echo "::notice::No published release below ${STEVE_REF} — the upgrade scenario will be skipped."
           else
-            echo "Previous release: ${previous}"
+            arch=$(IMAGE_ARCH="${ARCH}" ./hack/image-config.sh "${previous}" | jq -r '.architecture // empty')
+            if [ "${arch}" = "${ARCH}" ]; then
+              echo "Previous release: ${previous} (linux/${ARCH})"
+            else
+              echo "::notice::${previous} has no linux/${ARCH} manifest (found '${arch}') — the upgrade scenario is skipped on this runner."
+              previous=''
+            fi
           fi
           echo "previous_image=${previous:+${IMAGE}:${previous}}" >> "$GITHUB_OUTPUT"
 
       # The script's failure path is what makes a red step readable, and the
       # Cleanup step below would hide a cleanup bug in it. So first, a forced
-      # failure: a container that exits at once (alpine with no command, image
-      # already present from the probe above) must fail the script, print the
-      # database's log, and leave nothing behind — checked here, before the
-      # fallback cleanup gets a chance to. Seconds, since nothing boots.
+      # failure: a container that exits at once (alpine with no command, pulled
+      # by `docker run` itself — the probe above fetched it into the builder,
+      # not the daemon) must fail the script, print the database's log, and
+      # leave nothing behind — checked here, before the fallback cleanup gets a
+      # chance to. Seconds, since nothing boots.
       - name: Check migration-test.sh fails loudly and leaves nothing behind
         run: |
           set -euo pipefail
@@ -229,22 +307,46 @@ jobs:
           GHCR_USER: ${{ github.actor }}
         run: echo "${GHCR_TOKEN}" | docker login ghcr.io -u "${GHCR_USER}" --password-stdin
 
-      # One tag per SteVe release, and nothing else. The JRE is a build detail
-      # recorded in the image (see the README), not part of the tag: a JRE bump
-      # is not a new SteVe release and must not fragment the tag namespace.
+      # The same build, same builder, same inputs, exported again by digest —
+      # a cache hit of a few seconds (measured: 6–7 s), so what is pushed is
+      # what was probed above. Checked rather than assumed, by
+      # hack/check-pushed-digest.sh: the pushed manifest's config, read back
+      # from the registry, must carry the loaded image's layers. The export
+      # itself has no offline test — it needs buildx and a registry — and
+      # rests on the #27 spike (three runs) and a local registry:2 run; its
+      # one contract used here is `containerimage.digest` in the metadata
+      # file, which both showed.
       #
-      # No `latest`, and no `sha-${GITHUB_SHA}` tag: the latter WOULD add a
-      # stored version per build, for no benefit — consumers pin by digest.
-      - name: Push
+      # `--provenance=false`: the docker-container driver otherwise attaches an
+      # attestation, which makes each pushed "platform digest" a small index of
+      # its own, and the merged tag shows two `unknown/unknown` entries next to
+      # the platforms (measured). Attestations are ruled out in AGENTS.md.
+      #
+      # No tag here: the tag is the index the `publish` job assembles, and a
+      # per-platform tag would fragment the namespace that has one tag per
+      # SteVe release.
+      - name: Push by digest
+        id: digest
         if: github.ref_name == 'release'
         env:
           STEVE_REF: ${{ steps.ref.outputs.steve_ref }}
+          BUILD_DATE: ${{ steps.ref.outputs.build_date }}
         run: |
           set -euo pipefail
-          docker push "${IMAGE}:${STEVE_REF}"
-          echo "Pushed: ${IMAGE}:${STEVE_REF}"
-          echo "Digest to pin:"
-          docker inspect --format '{{ index .RepoDigests 0 }}' "${IMAGE}:${STEVE_REF}"
+          docker buildx build \
+            --builder "${BUILDER}" \
+            --build-arg STEVE_REF="${STEVE_REF}" \
+            --build-arg DB_IP=127.0.0.1 \
+            --build-arg BUILD_DATE="${BUILD_DATE}" \
+            --build-arg VCS_REF="${GITHUB_SHA}" \
+            --provenance=false \
+            --output "type=image,push=true,push-by-digest=true,name-canonical=true,name=${IMAGE}" \
+            --metadata-file "${RUNNER_TEMP}/push.json" \
+            .
+          digest=$(jq -r '."containerimage.digest" // empty' "${RUNNER_TEMP}/push.json")
+          [ -n "${digest}" ] || { echo "no containerimage.digest in the build metadata"; exit 1; }
+          ./hack/check-pushed-digest.sh "${IMAGE}:${STEVE_REF}" "${digest}"
+          echo "digest_${ARCH}=${digest}" >> "$GITHUB_OUTPUT"
 
       - name: Cleanup
         if: always()
@@ -252,4 +354,60 @@ jobs:
           docker rm -f steve-build-db || true
           docker ps -aq --filter 'label=steve-it' | xargs -r docker rm -f || true
           docker network ls -q --filter 'label=steve-it' | xargs -r docker network rm || true
+          docker buildx rm "${BUILDER}" || true
           docker logout ghcr.io || true
+
+  # One tag per SteVe release, and nothing else: an index of the two platform
+  # digests. The JRE is a build detail recorded in the image (see the README),
+  # not part of the tag: a JRE bump is not a new SteVe release and must not
+  # fragment the tag namespace. No `latest`, and no `sha-${GITHUB_SHA}` tag:
+  # the latter WOULD add a stored version per build, for no benefit —
+  # consumers pin by digest, the index's.
+  #
+  # `needs` waits for both builds to succeed. One failing after the other
+  # pushed leaves an untagged digest on GHCR and moves no tag — re-run the
+  # workflow from `release` and the next pair replaces it. The same holds
+  # for a candidate the script refuses: the tag is made only after the
+  # checks, so the platform digests are on GHCR before this job is green,
+  # the tag never before it is.
+  publish:
+    name: publish the index
+    needs: build
+    if: github.ref_name == 'release'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      STEVE_REF: ${{ needs.build.outputs.steve_ref }}
+      DIGEST_AMD64: ${{ needs.build.outputs.digest_amd64 }}
+      DIGEST_ARM64: ${{ needs.build.outputs.digest_arm64 }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      # A digest that did not arrive must not become an index of one platform.
+      - name: Check both digests arrived
+        run: |
+          set -euo pipefail
+          for var in STEVE_REF DIGEST_AMD64 DIGEST_ARM64; do
+            [ -n "${!var}" ] || { echo "${var} is empty — the build job did not hand it over."; exit 1; }
+          done
+          echo "amd64: ${DIGEST_AMD64}"
+          echo "arm64: ${DIGEST_ARM64}"
+
+      - name: Login to GHCR
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_USER: ${{ github.actor }}
+        run: echo "${GHCR_TOKEN}" | docker login ghcr.io -u "${GHCR_USER}" --password-stdin
+
+      # The tag is made from the two digests, checked, and printed by the
+      # script — in a file so that the release-only path has tests
+      # (hack/test/release-publish.sh) rather than a first run at release
+      # time. The revision every platform must carry is this commit's.
+      - name: Publish the index
+        env:
+          EXPECTED_REVISION: ${{ github.sha }}
+        run: ./hack/publish-index.sh "${STEVE_REF}" "${DIGEST_AMD64}" "${DIGEST_ARM64}"
+
+      - name: Cleanup
+        if: always()
+        run: docker logout ghcr.io || true
