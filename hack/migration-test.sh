@@ -36,7 +36,7 @@
 set -euo pipefail
 
 usage() { echo "Usage: $0 IMAGE [PREVIOUS_IMAGE]" >&2; exit 2; }
-[ $# -ge 1 ] && [ $# -le 2 ] || usage
+if [ $# -lt 1 ] || [ $# -gt 2 ]; then usage; fi
 image=$1
 previous=${2:-}
 
