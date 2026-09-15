@@ -178,11 +178,12 @@ database as `3307:3306` renames nothing inside the Compose network.
       - DB_PORT=3306   # still the container port: 3307 exists only on the host
 ```
 
-For a normal deployment MariaDB needs no `ports:` at all — the example above
-publishes none. SteVe reaches it over the Compose network, and an unpublished
-port is one less thing on the host to secure. Publish it only when something
-*outside* Docker has to connect (a GUI client, a backup job), and then that
-client is the one using the host port.
+For a normal deployment MariaDB needs no `ports:` at all — the minimal Compose
+setup above publishes none, and the `3307:3306` mapping shown here is only
+illustrative. SteVe reaches the database over the Compose network, and an
+unpublished port is one less thing on the host to secure. Publish it only when
+something *outside* Docker has to connect (a GUI client, a backup job), and
+then that client is the one using the host port.
 
 ### Security note
 
