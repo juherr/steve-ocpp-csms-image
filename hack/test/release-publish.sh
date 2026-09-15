@@ -68,7 +68,14 @@ expect_status 1 && expect_err 'not hold exactly linux/amd64 and linux/arm64' && 
 reset_log
 run 'a digest with an empty label is refused' \
   env EXPECTED_REVISION="${revision}" "${publish}" steve-1.0.1 sha256:pub-nocreated-amd64 sha256:pub-arm64
-expect_status 1 && expect_err 'label' && expect_untouched && pass
+expect_status 1 && expect_err 'org.opencontainers.image.created' && expect_untouched && pass
+
+# The contract is the nine org.opencontainers.image.* labels the Dockerfile
+# sets, by name — not "whatever labels are there are non-empty".
+reset_log
+run 'a digest missing a required label is refused' \
+  env EXPECTED_REVISION="${revision}" "${publish}" steve-1.0.1 sha256:pub-nodoc-amd64 sha256:pub-arm64
+expect_status 1 && expect_err 'org.opencontainers.image.documentation' && expect_untouched && pass
 
 reset_log
 run 'an unknown digest is refused' \
