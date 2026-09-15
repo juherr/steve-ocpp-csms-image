@@ -212,8 +212,18 @@ Stop the application — the database stays up — and take a dump:
 
 ```bash
 docker compose stop steve
-docker compose exec -T steve-db sh -c 'MYSQL_PWD="$MARIADB_PASSWORD" mariadb-dump --single-transaction --routines --events -u steve stevedb' > steve-backup-$(date +%F).sql
+f=steve-backup-$(date +%Y%m%dT%H%M%S).sql
+docker compose exec -T steve-db sh -c 'MYSQL_PWD="$MARIADB_PASSWORD" mariadb-dump --single-transaction --routines --events -u steve stevedb' > "$f.partial" && mv "$f.partial" "$f"
+tail -1 "$f"
 ```
+
+The `tail` must print `-- Dump completed on …`, the last line `mariadb-dump`
+writes. The rest of the shape is what keeps a bad dump from passing for a
+good one: the timestamp is to the second, so a retry never overwrites an
+earlier file; and since the redirection creates its file before
+`mariadb-dump` has even connected, the output goes to `.partial` and is
+renamed only when the command exits 0 — a refused login exits 2 and leaves a
+0-byte `.partial` and no `.sql` (measured).
 
 The password never appears on a command line: `MYSQL_PWD` is set inside the
 container, from the `MARIADB_PASSWORD` it was started with, so there is
@@ -225,10 +235,10 @@ keeps the dump complete if a release brings them back. The `steve` user is
 enough to dump and restore all of it — checked on `mariadb:11.8` with a
 procedure, an event and a trigger.
 
-A logical dump rather than a copy of `./data/mariadb`: it restores across
-MariaDB versions and hosts, a copied data directory only into a matching
-server. Any other backup you trust works too; the dump is the way back this
-procedure relies on — see *Downgrading*.
+A logical dump rather than a copy of `./data/mariadb`: it is portable across
+hosts and compatible MariaDB versions, where a copied data directory only
+restores into a matching server. Any other backup you trust works too; the
+dump is the way back this procedure relies on — see *Downgrading*.
 
 ### 2. Keep the identity of the stack
 
@@ -244,12 +254,19 @@ then starts a second project beside the running one, and `docker compose ps`,
 `logs` and `stop` now address the new, empty one. (Measured: the second
 MariaDB cannot lock `./data/mariadb` while the first holds it — `Can't lock
 aria control file … error: 11` — so it never comes up; the original stack
-keeps running, unmanaged.) Read the name in use first, and pin exactly that:
+keeps running, unmanaged.) Read the name in effect first, and pin exactly
+that:
 
 ```bash
 docker compose config | head -1
 ```
 
+Run it the way you run `up` — same directory, same `-p`, same environment —
+because `name:` is not the top of the chain: `-p` beats `COMPOSE_PROJECT_NAME`
+(exported, or in `.env`), which beats `name:`, which beats the directory
+(measured, all four). If the name comes from `-p` or `COMPOSE_PROJECT_NAME`,
+either keep that override for good or move its value into `name:` and drop
+it — one of the two, or `name:` pins nothing.
 ### 3. Change the image line
 
 Pick the new tag and its digest (see *Tags*), and edit the one line:
@@ -332,7 +349,7 @@ the dump from step 1:
 ```bash
 docker compose stop steve
 docker compose exec -T steve-db sh -c 'MYSQL_PWD="$MARIADB_PASSWORD" mariadb -u steve -e "DROP DATABASE stevedb; CREATE DATABASE stevedb"'
-docker compose exec -T steve-db sh -c 'MYSQL_PWD="$MARIADB_PASSWORD" mariadb -u steve stevedb' < steve-backup-<date>.sql
+docker compose exec -T steve-db sh -c 'MYSQL_PWD="$MARIADB_PASSWORD" mariadb -u steve stevedb' < steve-backup-<timestamp>.sql
 ```
 
 Put the previous image line back, `docker compose up -d steve`, and Flyway
