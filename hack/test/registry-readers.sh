@@ -104,6 +104,23 @@ run 'the label survives the walk' \
   "${helper}" steve-1.0.1
 expect_status 0 && expect_out "\"org.opencontainers.image.revision\": \"${revision}\"" && pass
 
+# IMAGE_ARCH: the build workflow asks for the runner's own architecture before
+# running the upgrade scenario against the previous release. An index answers
+# with that platform's config; an architecture the index lacks falls back like
+# the amd64 default does; a single manifest is returned whatever is asked — the
+# caller reads `.architecture` and decides.
+run 'index: IMAGE_ARCH=arm64 follows the arm64 entry' \
+  env IMAGE_ARCH=arm64 "${helper}" steve-1.0.1
+expect_config arm64 && pass
+
+run 'index: an IMAGE_ARCH it lacks falls back to the first platform entry' \
+  env IMAGE_ARCH=s390x "${helper}" steve-1.0.1
+expect_config arm64 && pass
+
+run 'single manifest: IMAGE_ARCH is not a filter' \
+  env IMAGE_ARCH=arm64 "${helper}" steve-1.0.0
+expect_config amd64 && pass
+
 # --- helper: failure contract ------------------------------------------------
 
 run 'index of attestations only fails' \

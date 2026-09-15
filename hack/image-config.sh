@@ -10,12 +10,17 @@
 # 404 rather than the index (measured on aquasecurity/trivy:latest, 2026-09-15).
 # The preflight would then refuse every release, and drift would go silent.
 #
-# So this walks both shapes. On an index it takes the linux/amd64 entry, or
-# failing that the first platform entry: the `revision` label is the same on
-# every platform of one build, so one platform answers the question the
-# callers ask. The entries it skips are buildx attestations — `unknown/unknown`
-# platform, annotated `vnd.docker.reference.type: attestation-manifest` — which
-# carry no image config at all.
+# So this walks both shapes. On an index it takes the linux/IMAGE_ARCH entry
+# (amd64 unless asked otherwise), or failing that the first platform entry: the
+# `revision` label is the same on every platform of one build, so one platform
+# answers the question the callers ask, and they leave the default alone. The
+# build workflow is the one reader that sets IMAGE_ARCH — to its runner's own
+# architecture, before running the upgrade scenario against the previous
+# release, which may predate the arm64 variant; it then reads `.architecture`
+# off the answer, which is why a single manifest comes back unfiltered. The
+# entries skipped are buildx attestations — `unknown/unknown` platform,
+# annotated `vnd.docker.reference.type: attestation-manifest` — which carry no
+# image config at all.
 #
 # Every failure exits 1 with one `image-config:` line on stderr saying why;
 # when the registry is the cause, curl's own diagnostic comes first, kept on
@@ -24,11 +29,13 @@
 # closed while drift keeps reporting only.
 #
 # Usage:  ./hack/image-config.sh <tag-or-digest>
+#         IMAGE_ARCH=arm64 ./hack/image-config.sh steve-X.Y.Z
 #         REGISTRY_REPO=aquasecurity/trivy ./hack/image-config.sh latest
 
 set -euo pipefail
 
 REGISTRY_REPO="${REGISTRY_REPO:-juherr/steve}"
+IMAGE_ARCH="${IMAGE_ARCH:-amd64}"
 
 die() { printf 'image-config: %s\n' "$1" >&2; exit 1; }
 
@@ -50,10 +57,10 @@ manifest=$(curl -fsS -H "Authorization: Bearer ${token}" -H "Accept: ${accept}" 
   || die "could not read the manifest of ${ref}"
 
 # An index has `.manifests`; an image manifest has `.config`.
-platform=$(jq -r '
+platform=$(jq -r --arg arch "${IMAGE_ARCH}" '
   if .manifests then
     [.manifests[] | select(.annotations["vnd.docker.reference.type"] != "attestation-manifest")]
-    | (map(select(.platform.os == "linux" and .platform.architecture == "amd64")) + .)
+    | (map(select(.platform.os == "linux" and .platform.architecture == $arch)) + .)
     | first.digest // empty
   else empty end' <<<"${manifest}") \
   || die "the manifest of ${ref} is not JSON"
