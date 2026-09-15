@@ -62,6 +62,7 @@ on:
       - "flyway-callbacks/**"
       - "hack/migration-test.sh"
       - "hack/image-config.sh"
+      - "hack/check-pushed-digest.sh"
       - "hack/publish-index.sh"
       - ".github/workflows/build-image.yml"
 
@@ -308,9 +309,13 @@ jobs:
 
       # The same build, same builder, same inputs, exported again by digest —
       # a cache hit of a few seconds (measured: 6–7 s), so what is pushed is
-      # what was probed above. Checked rather than assumed: the layers of the
-      # pushed manifest's config must be the loaded image's, read back from
-      # the registry through the same helper the release gate reads through.
+      # what was probed above. Checked rather than assumed, by
+      # hack/check-pushed-digest.sh: the pushed manifest's config, read back
+      # from the registry, must carry the loaded image's layers. The export
+      # itself has no offline test — it needs buildx and a registry — and
+      # rests on the #27 spike (three runs) and a local registry:2 run; its
+      # one contract used here is `containerimage.digest` in the metadata
+      # file, which both showed.
       #
       # `--provenance=false`: the docker-container driver otherwise attaches an
       # attestation, which makes each pushed "platform digest" a small index of
@@ -340,16 +345,7 @@ jobs:
             .
           digest=$(jq -r '."containerimage.digest" // empty' "${RUNNER_TEMP}/push.json")
           [ -n "${digest}" ] || { echo "no containerimage.digest in the build metadata"; exit 1; }
-
-          loaded=$(docker inspect --format '{{ json .RootFS.Layers }}' "${IMAGE}:${STEVE_REF}" | jq -c .)
-          pushed=$(IMAGE_ARCH="${ARCH}" ./hack/image-config.sh "${digest}" | jq -c '.rootfs.diff_ids')
-          if [ "${loaded}" != "${pushed}" ]; then
-            echo "The pushed ${digest} does not have the layers of the image that was probed:"
-            echo "  probed: ${loaded}"
-            echo "  pushed: ${pushed}"
-            exit 1
-          fi
-          echo "Pushed linux/${ARCH}: ${IMAGE}@${digest}"
+          ./hack/check-pushed-digest.sh "${IMAGE}:${STEVE_REF}" "${digest}"
           echo "digest_${ARCH}=${digest}" >> "$GITHUB_OUTPUT"
 
       - name: Cleanup

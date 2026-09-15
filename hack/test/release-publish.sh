@@ -22,6 +22,7 @@ here=$(cd "$(dirname "$0")" && pwd)
 # shellcheck source=hack/test/lib.sh
 . "${here}/lib.sh"
 publish="${HACK_DIR}/publish-index.sh"
+check="${HACK_DIR}/check-pushed-digest.sh"
 
 setup_fixtures
 
@@ -86,8 +87,44 @@ run 'no EXPECTED_REVISION is a usage error' \
   env -u EXPECTED_REVISION "${publish}" steve-1.0.1 sha256:pub-amd64 sha256:pub-arm64
 expect_status 2 && expect_err 'Usage' && pass
 
-run 'a malformed digest is a usage error' \
+run 'publish: a malformed digest is a usage error' \
   env EXPECTED_REVISION="${revision}" "${publish}" steve-1.0.1 pub-amd64 sha256:pub-arm64
+expect_status 2 && expect_err 'Usage' && pass
+
+# --- check-pushed-digest.sh -----------------------------------------------
+
+# What `docker inspect` answers for the image `--load` put in the daemon.
+mkdir -p "${FAKE_DOCKER}/images"
+loaded_image() {
+  jq -n --arg arch "$2" --argjson layers "$3" '{Architecture: $arch, RootFS: {Type: "layers", Layers: $layers}}' \
+    > "${FAKE_DOCKER}/images/$1.json"
+}
+loaded_image steve_probed amd64 '["sha256:diff-amd64-1", "sha256:diff-amd64-2"]'
+loaded_image steve_rebuilt amd64 '["sha256:diff-amd64-1", "sha256:diff-amd64-other"]'
+loaded_image steve_arm amd64 '["sha256:diff-arm64-1", "sha256:diff-arm64-2"]'
+
+run 'the pushed digest with the probed layers passes' \
+  "${check}" steve:probed sha256:pub-amd64
+expect_status 0 && expect_out 'is the probed steve:probed (linux/amd64, 2 layers)' && pass
+
+run 'a pushed digest with other layers fails' \
+  "${check}" steve:rebuilt sha256:pub-amd64
+expect_status 1 && expect_err 'does not have the layers of the image that was probed' && expect_err 'sha256:diff-amd64-other' && pass
+
+run 'a pushed digest of another architecture fails' \
+  "${check}" steve:arm sha256:pub-arm64
+expect_status 1 && expect_err 'is arm64, the probed image is amd64' && pass
+
+run 'an unknown pushed digest fails' \
+  "${check}" steve:probed sha256:nowhere
+expect_status 1 && expect_err 'could not read the image config of sha256:nowhere' && pass
+
+run 'an unknown local image fails' \
+  "${check}" steve:nowhere sha256:pub-amd64
+expect_status 1 && expect_err 'no local image steve:nowhere' && pass
+
+run 'check: a malformed digest is a usage error' \
+  "${check}" steve:probed pub-amd64
 expect_status 2 && expect_err 'Usage' && pass
 
 exit "${failed}"
