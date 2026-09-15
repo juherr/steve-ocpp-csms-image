@@ -372,15 +372,18 @@ docker run -d --name steve-build-db \
   -e TZ=+00:00 \
   mariadb:11.8 --innodb-use-native-aio=0
 
-docker build \
-  --network=host \
+docker buildx create --name steve-builder --driver docker-container --driver-opt network=host
+
+docker buildx build \
+  --builder steve-builder \
   --build-arg STEVE_REF=steve-3.14.1 \
   --build-arg DB_IP=127.0.0.1 \
   --build-arg BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
   --build-arg VCS_REF="$(git rev-parse HEAD)" \
-  -t steve:local .
+  --load -t steve:local .
 
 docker rm -f steve-build-db
+docker buildx rm steve-builder
 ```
 
 `BUILD_DATE` and `VCS_REF` stamp the `org.opencontainers.image.created` and
@@ -395,10 +398,14 @@ schema that tag wrote is upgraded by the new image:
 ./hack/migration-test.sh steve:local
 ```
 
-`--network=host` is what lets the `RUN` steps reach the database on
-`127.0.0.1`. BuildKit only accepts `host`, `none` or `default` for `--network`,
-so a dedicated Docker network is not an option; the legacy builder that allowed
-one has been deprecated since Docker Engine 23.
+The build goes through a `docker-container` builder created on the host
+network rather than through a plain `docker build --network=host`, because
+that is how CI builds: each architecture is built natively on its own runner
+and pushed *by digest*, which the daemon's default builder refuses, and the two
+digests are then merged into the one `steve-X.Y.Z` tag. With the builder itself
+on the host network, its `RUN` steps reach the database on `127.0.0.1` with no
+`--network` flag at all. Using the same builder locally is what keeps the claim
+above true — a CI failure reproduces here, builder included.
 
 ## Releasing
 
@@ -410,11 +417,11 @@ from a terminal:
 git push origin main:release
 ```
 
-Either way the image builds on a GitHub-hosted runner and is pushed to GHCR,
-with the resulting digest printed at the end, ready to pin. The version built is
-whatever `ARG STEVE_REF` says in the `Dockerfile` on that commit — the single
-place the release is pinned in code, which is why the workflow asks for no
-version.
+Either way the image builds on GitHub-hosted runners, one per architecture, and
+is pushed to GHCR, with the resulting digest printed at the end, ready to pin.
+The version built is whatever `ARG STEVE_REF` says in the `Dockerfile` on that
+commit — the single place the release is pinned in code, which is why the
+workflow asks for no version.
 
 The workflow adds one check the bare push cannot make: it refuses when the tag
 is already published *and* the packaging has not changed since, because that

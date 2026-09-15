@@ -138,7 +138,8 @@ jobs:
               echo "Build: ${REPO_URL}/actions/workflows/build-image.yml?query=branch%3Arelease"
             fi
             echo
-            echo "The digest to pin is printed by that run's **Push** step."
+            echo "The digest to pin — the index's — is printed by that run's **publish** job,"
+            echo "once both architectures have built and been merged into one tag."
             echo "It publishes \`ghcr.io/juherr/steve:${steve_ref}\`; nothing is on"
             echo "GHCR until it goes green."
           } >> "$GITHUB_STEP_SUMMARY"

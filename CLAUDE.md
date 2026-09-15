@@ -15,17 +15,23 @@ descriptions — in English.
 
 The one unit test suite is `hack/test/registry-readers.sh`, and it covers the
 registry readers alone, offline, against fixtures. For the image itself the
-meaningful checks are a full `docker build`, which clones SteVe and runs Maven
-against a live MariaDB (~2 min on CI, longer locally), and
+meaningful checks are a full build, which clones SteVe and runs Maven against a
+live MariaDB (~2 min on CI, once per architecture, longer locally), and
 `hack/migration-test.sh` on the result, which boots the image against an empty
 MariaDB, boots it again on the schema that left behind, and — given a previous
 release as second argument — on a schema that release wrote. So:
 
 - Never claim a change to the `Dockerfile` or the workflow is "verified" without
-  having actually built. Say what you ran and what you did not.
+  having actually built. Say what you ran and what you did not — and on which
+  architecture: a pull request builds both, a laptop builds one.
 - A build that fails with a connection error to `127.0.0.1:3306` means the
   throwaway MariaDB is missing or not ready — start it first, it is not a
-  regression in the change under review.
+  regression in the change under review. `push-by-digest is currently not
+  implemented for docker driver` means the `--builder` was dropped and the
+  build went to the daemon's default builder — same category.
+- The push-by-digest export, the index merge and the checks on the published
+  index run only on `release`. A pull request proves the builds and the probes
+  on both runners; say so rather than calling the whole workflow verified.
 - For label-only changes, inspecting `.Config.Labels` on the built image is the
   proof; reading the `Dockerfile` is not.
 - For a change to `hack/migration-test.sh`, running it is the proof — against a
