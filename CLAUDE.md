@@ -54,12 +54,14 @@ Reading the labels of a published tag without pulling it:
 
 ```bash
 TAG=$(sed -n 's/^ARG STEVE_REF=//p' Dockerfile)   # or any tag already published
-TOKEN=$(curl -s "https://ghcr.io/token?scope=repository:juherr/steve:pull&service=ghcr.io" | jq -r .token)
-CFG=$(curl -s -H "Authorization: Bearer $TOKEN" \
-  -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \
-  "https://ghcr.io/v2/juherr/steve/manifests/$TAG" | jq -r .config.digest)
-curl -sL -H "Authorization: Bearer $TOKEN" "https://ghcr.io/v2/juherr/steve/blobs/$CFG" | jq '.config.Labels'
+./hack/image-config.sh "$TAG" | jq '.config.Labels'
 ```
+
+The helper walks an image index down to its `linux/amd64` manifest, so this
+reads the labels whether the tag is a single manifest or an index;
+`REGISTRY_REPO=` points it at another package. It is the same code path
+`release-preflight.sh` and `release-drift.sh` read through — do not retype its
+`curl` calls into a recipe of their own.
 
 ## Tooling
 
