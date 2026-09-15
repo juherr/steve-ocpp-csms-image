@@ -137,11 +137,53 @@ upstream build. Override every one of them that matters to you.
 | `AUTH_USER` | management UI user | `admin` |
 | `AUTH_PASSWORD` | management UI password | `1234` |
 | `WEBAPI_KEY` | REST WebAPI key | upstream default |
+| `SERVER_HOST` | bind address inside the container | `0.0.0.0` |
 | `AUTO_REGISTER_UNKNOWN_STATIONS` | accept unknown charge points | `false` |
 
 See upstream's `application.properties` for the full list.
 
 > The image runs as UID/GID `10001`, not root.
+
+### Networking
+
+Two address spaces are in play, and mixing them up is where most Docker
+support issues upstream come from. In `ports: "8180:8180"` the left side is
+the **host** — the interface and port a browser or a charge point reaches from
+outside — and the right side is the **container**, where SteVe actually
+listens.
+
+**With the Compose setup above, SteVe listens on `0.0.0.0:8180` inside the
+container, and it should stay that way.** That is what the compiled-in
+`docker` profile sets. Do not point `SERVER_HOST` at the machine's LAN address
+to "make it reachable": on the default bridge network that address does not
+exist in the container's network namespace, so Jetty cannot bind and the
+application fails to start — `Failed to start bean 'webServerStartStop'`,
+caused by `Cannot assign requested address`. The interface is chosen on the
+host side of the mapping instead — `"192.168.1.10:8180:8180"` publishes on
+one LAN address only, `"127.0.0.1:8180:8180"` when a reverse proxy on the
+same host is the only client. The container side, `8180`, does not change.
+
+Container-to-container traffic uses the Compose **service name** and the
+**container port**. `DB_IP=steve-db` is resolved by Docker's embedded DNS,
+and `DB_PORT` stays `3306` whatever the host mapping says: publishing the
+database as `3307:3306` renames nothing inside the Compose network.
+
+```yaml
+  steve-db:
+    ports:
+      - "3307:3306"    # host:container — only the host side changed
+  steve:
+    environment:
+      - DB_IP=steve-db
+      - DB_PORT=3306   # still the container port: 3307 exists only on the host
+```
+
+For a normal deployment MariaDB needs no `ports:` at all — the minimal Compose
+setup above publishes none, and the `3307:3306` mapping shown here is only
+illustrative. SteVe reaches the database over the Compose network, and an
+unpublished port is one less thing on the host to secure. Publish it only when
+something *outside* Docker has to connect (a GUI client, a backup job), and
+then that client is the one using the host port.
 
 ### Security note
 
