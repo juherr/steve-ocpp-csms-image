@@ -32,6 +32,10 @@ expect_published() {
   [ "$(created)" -eq 1 ] || { fail "expected exactly one create -t, got $(created)"; return 1; }
   expect_out 'Digest to pin:' && expect_out "ghcr.io/juherr/steve:$1@sha256:"
 }
+# A refusal is only worth something if it comes before the tag moves.
+expect_untouched() {
+  [ "$(created)" -eq 0 ] || { fail "the tag was created or moved: $(cat "${FAKE_DOCKER}/log")"; return 1; }
+}
 
 # --- publish-index.sh: the good candidate ---------------------------------
 
@@ -49,22 +53,22 @@ expect_status 0 && expect_out '["linux/amd64","linux/arm64"]' && pass
 reset_log
 run 'a digest built from another commit is refused' \
   env EXPECTED_REVISION="${revision}" "${publish}" steve-1.0.1 sha256:pub-amd64 sha256:pub-otherrev-arm64
-expect_status 1 && expect_err "carries revision '0000000000000000000000000000000000000000'" && pass
+expect_status 1 && expect_err "carries revision '0000000000000000000000000000000000000000'" && expect_untouched && pass
 
 reset_log
 run 'a digest that is an index with an attestation is refused' \
   env EXPECTED_REVISION="${revision}" "${publish}" steve-1.0.1 sha256:pub-amd64 sha256:pub-attested-arm64
-expect_status 1 && expect_err 'does not hold exactly linux/amd64 and linux/arm64' && pass
+expect_status 1 && expect_err 'does not hold exactly linux/amd64 and linux/arm64' && expect_untouched && pass
 
 reset_log
 run 'a digest with an empty label is refused' \
   env EXPECTED_REVISION="${revision}" "${publish}" steve-1.0.1 sha256:pub-nocreated-amd64 sha256:pub-arm64
-expect_status 1 && expect_err 'label' && pass
+expect_status 1 && expect_err 'label' && expect_untouched && pass
 
 reset_log
 run 'an unknown digest is refused' \
   env EXPECTED_REVISION="${revision}" "${publish}" steve-1.0.1 sha256:pub-amd64 sha256:nowhere
-expect_status 1 && expect_err 'sha256:nowhere' && pass
+expect_status 1 && expect_err 'sha256:nowhere' && expect_untouched && pass
 
 run 'no EXPECTED_REVISION is a usage error' \
   env -u EXPECTED_REVISION "${publish}" steve-1.0.1 sha256:pub-amd64 sha256:pub-arm64
