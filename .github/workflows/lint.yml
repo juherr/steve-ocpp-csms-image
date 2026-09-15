@@ -1,7 +1,7 @@
 ---
-# Static checks — no Docker build, no registry, no database. Seconds, not
-# minutes, so this runs on every pull request whatever it touches (unlike the
-# image build, which is path-filtered).
+# Static checks plus the one offline test — no Docker build, no registry, no
+# database. Seconds, not minutes, so this runs on every pull request whatever
+# it touches (unlike the image build, which is path-filtered).
 #
 # The linters run from their own pinned images instead of third-party actions:
 # one less thing to pin by SHA, and the exact command below is runnable locally.
@@ -51,3 +51,14 @@ jobs:
       - name: actionlint (workflows)
         run: |
           docker run --rm -v "${PWD}:/repo" -w /repo "${ACTIONLINT_IMAGE}" -color
+
+  # The registry readers, against fixtures rather than GHCR: the multi-arch
+  # shapes they must handle are not published under juherr/steve yet, and the
+  # release gate should not be the first place they are met.
+  registry-readers:
+    name: Registry readers (fixtures)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - run: ./hack/test/registry-readers.sh

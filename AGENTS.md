@@ -20,7 +20,7 @@ this repository — if something must change in SteVe, it changes upstream.
 | `entrypoint.sh` | Runs Flyway migrations against the runtime database, then starts the `.war` |
 | `flyway-callbacks/afterConnect.sql` | Forces `default_storage_engine=InnoDB`; replaces `-initSql`, removed in Flyway 13 |
 | `.github/workflows/build-image.yml` | Build & push to GHCR — see its `on:` block for the triggers |
-| `.github/workflows/lint.yml` | hadolint / shellcheck / actionlint |
+| `.github/workflows/lint.yml` | hadolint / shellcheck / actionlint, and `hack/test/registry-readers.sh` |
 | `.github/workflows/scan-published.yml` | Weekly Trivy scan of the tags already on GHCR |
 | `.github/workflows/release.yml` | The release, from the Actions tab: preflight, fast-forward `release`, start the build |
 | `.github/workflows/release-drift.yml` | Schedules `hack/release-drift.sh` — see that script for what it compares |
@@ -28,6 +28,7 @@ this repository — if something must change in SteVe, it changes upstream.
 | `hack/release-preflight.sh` | Would releasing HEAD publish anything, or only move a digest; runnable by hand |
 | `hack/migration-test.sh` | Fresh-database migration, restart and upgrade scenarios against the built image; what CI runs after the build, runnable by hand |
 | `hack/image-config.sh` | Image config of a published tag, single manifest or index; what the two scripts above and the `CLAUDE.md` recipe read through |
+| `hack/test/` | Offline tests of the three scripts above, against a fixture registry served by a `curl` shim |
 | `README.md` | User-facing documentation |
 | `.github/assets/` | Images referenced by `README.md`; outside the build context |
 | `NOTICE` | License aggregation of the produced image — must stay accurate |
@@ -191,7 +192,12 @@ prefer arrays to space-separated strings when a command takes a path list.
 
 The linters are the cheap gate. Run the three steps of
 `.github/workflows/lint.yml` — that file pins the images, so copying the
-commands here would only create a second version to keep in sync.
+commands here would only create a second version to keep in sync — and
+`./hack/test/registry-readers.sh`, which is the whole test suite: the registry
+readers against a fixture registry, no network. A change to
+`hack/image-config.sh` or to either script that reads through it is not
+verified until that passes; a new manifest shape the readers must handle goes
+in as a fixture under `hack/test/registry/` first.
 
 A change to a pin — or to a file holding one — is proven by making Renovate say
 so, not by reading `renovate.json`. `--platform=local` runs on the working

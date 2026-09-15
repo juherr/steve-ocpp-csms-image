@@ -1,0 +1,11 @@
+{
+  "architecture": "amd64",
+  "os": "linux",
+  "config": {
+    "Labels": {
+      "org.opencontainers.image.revision": "@REVISION@",
+      "org.opencontainers.image.source": "https://github.com/juherr/steve-ocpp-csms-image",
+      "org.opencontainers.image.version": "steve-1.0.1"
+    }
+  }
+}

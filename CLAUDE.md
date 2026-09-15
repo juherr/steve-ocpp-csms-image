@@ -13,12 +13,13 @@ descriptions — in English.
 
 ## Verification has a real cost here
 
-There is no unit test suite. The meaningful checks are a full `docker build`,
-which clones SteVe and runs Maven against a live MariaDB (~2 min on CI, longer
-locally), and `hack/migration-test.sh` on the result, which boots the image
-against an empty MariaDB, boots it again on the schema that left behind, and —
-given a previous release as second argument — on a schema that release wrote.
-So:
+The one unit test suite is `hack/test/registry-readers.sh`, and it covers the
+registry readers alone, offline, against fixtures. For the image itself the
+meaningful checks are a full `docker build`, which clones SteVe and runs Maven
+against a live MariaDB (~2 min on CI, longer locally), and
+`hack/migration-test.sh` on the result, which boots the image against an empty
+MariaDB, boots it again on the schema that left behind, and — given a previous
+release as second argument — on a schema that release wrote. So:
 
 - Never claim a change to the `Dockerfile` or the workflow is "verified" without
   having actually built. Say what you ran and what you did not.
