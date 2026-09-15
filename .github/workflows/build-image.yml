@@ -62,6 +62,7 @@ on:
       - "flyway-callbacks/**"
       - "hack/migration-test.sh"
       - "hack/image-config.sh"
+      - "hack/publish-index.sh"
       - ".github/workflows/build-image.yml"
 
 permissions:
@@ -381,6 +382,8 @@ jobs:
       DIGEST_AMD64: ${{ needs.build.outputs.digest_amd64 }}
       DIGEST_ARM64: ${{ needs.build.outputs.digest_arm64 }}
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
       # A digest that did not arrive must not become an index of one platform.
       - name: Check both digests arrived
         run: |
@@ -397,46 +400,14 @@ jobs:
           GHCR_USER: ${{ github.actor }}
         run: echo "${GHCR_TOKEN}" | docker login ghcr.io -u "${GHCR_USER}" --password-stdin
 
-      - name: Merge the platform digests into the tag
-        run: |
-          set -euo pipefail
-          docker buildx imagetools create -t "${IMAGE}:${STEVE_REF}" \
-            "${IMAGE}@${DIGEST_AMD64}" "${IMAGE}@${DIGEST_ARM64}"
-
-      # Read back from the registry, not from what was meant: exactly the two
-      # platforms, no attestation entry, every OCI label non-empty on each
-      # platform manifest, and both built from this very commit.
-      - name: Check the published index
-        run: |
-          set -euo pipefail
-          docker buildx imagetools inspect "${IMAGE}:${STEVE_REF}"
-          docker buildx imagetools inspect "${IMAGE}:${STEVE_REF}" --format '{{ json .Manifest }}' \
-            | jq -e '[.manifests[].platform | "\(.os)/\(.architecture)"] | sort == ["linux/amd64", "linux/arm64"]' >/dev/null \
-            || { echo "the index does not hold exactly linux/amd64 and linux/arm64"; exit 1; }
-          docker buildx imagetools inspect "${IMAGE}:${STEVE_REF}" --format '{{ json .Image }}' \
-            | jq 'map_values(.config.Labels)' > "${RUNNER_TEMP}/labels.json"
-          jq . "${RUNNER_TEMP}/labels.json"
-          jq -e 'all(.[]; to_entries | all(.value != ""))' "${RUNNER_TEMP}/labels.json" >/dev/null \
-            || { echo "an empty label on one of the platforms"; exit 1; }
-          jq -e --arg sha "${GITHUB_SHA}" \
-            '[.[]["org.opencontainers.image.revision"]] | unique == [$sha]' "${RUNNER_TEMP}/labels.json" >/dev/null \
-            || { echo "revision differs across platforms, or is not ${GITHUB_SHA}"; exit 1; }
-
-      - name: Digest to pin
-        run: |
-          set -euo pipefail
-          digest=$(docker buildx imagetools inspect "${IMAGE}:${STEVE_REF}" --format '{{ .Manifest.Digest }}')
-          echo "Pushed: ${IMAGE}:${STEVE_REF} (linux/amd64, linux/arm64)"
-          echo "Digest to pin:"
-          echo "${IMAGE}:${STEVE_REF}@${digest}"
-          {
-            echo "### Published \`${IMAGE}:${STEVE_REF}\`"
-            echo
-            echo "Index (the digest to pin): \`${digest}\`"
-            echo
-            echo "- linux/amd64: \`${DIGEST_AMD64}\`"
-            echo "- linux/arm64: \`${DIGEST_ARM64}\`"
-          } >> "$GITHUB_STEP_SUMMARY"
+      # The tag is made from the two digests, checked, and printed by the
+      # script — in a file so that the release-only path has tests
+      # (hack/test/release-publish.sh) rather than a first run at release
+      # time. The revision every platform must carry is this commit's.
+      - name: Publish the index
+        env:
+          EXPECTED_REVISION: ${{ github.sha }}
+        run: ./hack/publish-index.sh "${STEVE_REF}" "${DIGEST_AMD64}" "${DIGEST_ARM64}"
 
       - name: Cleanup
         if: always()

@@ -10,9 +10,9 @@
 # the network, and the scripts under test are the real ones, unmodified.
 #
 # The callers run in a throwaway git repository whose HEAD is what the fixture
-# image claims as its revision, so their full path is exercised — through an
-# index, to the label, to the tree comparison — without a multi-arch tag on
-# GHCR. That is the deterministic form of #28's "point both scripts at a
+# image claims as its revision (lib.sh sets it up), so their full path is
+# exercised — through an index, to the label, to the tree comparison — without
+# a multi-arch tag on GHCR. That is the deterministic form of #28's "point both scripts at a
 # multi-arch image", which neither script can do literally: preflight looks
 # for the Dockerfile's tag, drift for the newest steve-X.Y.Z, and a foreign
 # image has neither.
@@ -24,59 +24,14 @@
 set -euo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)
-HACK_DIR="${HACK_DIR:-$(dirname "${here}")}"
+# shellcheck source=hack/test/lib.sh
+. "${here}/lib.sh"
 helper="${HACK_DIR}/image-config.sh"
 preflight="${HACK_DIR}/release-preflight.sh"
 drift="${HACK_DIR}/release-drift.sh"
 
-work=$(mktemp -d "${TMPDIR:-/tmp}/steve-ocpp-csms-image-registry-readers.XXXXXX")
-trap 'rm -rf "${work}"' EXIT
-
-# --- fixtures ---------------------------------------------------------------
-
-mkdir -p "${work}/bin"
-ln -s "${here}/fake-curl.sh" "${work}/bin/curl"
-export PATH="${work}/bin:${PATH}"
-export FAKE_REGISTRY="${work}/registry"
-cp -R "${here}/registry" "${FAKE_REGISTRY}"
-
-# A repository whose HEAD is the commit the fixture image was "built from".
-repo="${work}/repo"
-git init -q -b main "${repo}"
-git -C "${repo}" -c user.name=test -c user.email=test@example.invalid \
-  commit -q --allow-empty -m 'the commit the fixture image records'
-git -C "${repo}" branch -q release
-git -C "${repo}" remote add origin "${repo}"
-revision=$(git -C "${repo}" rev-parse HEAD)
-for blob in "${FAKE_REGISTRY}"/v2/juherr/steve/blobs/*; do
-  sed -i.bak "s/@REVISION@/${revision}/" "${blob}" && rm "${blob}.bak"
-done
+setup_fixtures
 printf 'ARG STEVE_REF=steve-1.0.1\n' > "${repo}/Dockerfile"
-
-# --- harness ----------------------------------------------------------------
-
-failed=0
-out='' err='' status=0
-
-# run <name> <command...>: captures stdout, stderr and the exit status. Every
-# command runs from the throwaway repository, where the callers read the
-# Dockerfile and git, and without the GitHub Actions variables — under them
-# drift would write to the real step summary and format its warning as an
-# annotation.
-run() {
-  name="$1"; shift
-  set +e
-  out=$(cd "${repo}" && env -u GITHUB_ACTIONS -u GITHUB_STEP_SUMMARY "$@" 2>"${work}/stderr"); status=$?
-  set -e
-  err=$(cat "${work}/stderr")
-}
-
-pass() { printf 'ok   %s\n' "${name}"; }
-fail() { printf 'FAIL %s: %s\n  stdout: %s\n  stderr: %s\n' "${name}" "$1" "${out}" "${err}"; failed=1; }
-
-expect_status() { [ "${status}" -eq "$1" ] || { fail "exit ${status}, expected $1"; return 1; }; }
-expect_out()    { [[ "${out}" == *"$1"* ]] || { fail "stdout lacks '$1'"; return 1; }; }
-expect_err()    { [[ "${err}" == *"$1"* ]] || { fail "stderr lacks '$1'"; return 1; }; }
 
 # The helper's failure contract: exit 1, and its own one-line reason on stderr
 # (curl's diagnostic may precede it — that is the part that says 404 vs 403).

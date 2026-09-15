@@ -52,13 +52,15 @@ jobs:
         run: |
           docker run --rm -v "${PWD}:/repo" -w /repo "${ACTIONLINT_IMAGE}" -color
 
-  # The registry readers, against fixtures rather than GHCR: the multi-arch
-  # shapes they must handle are not published under juherr/steve yet, and the
-  # release gate should not be the first place they are met.
-  registry-readers:
-    name: Registry readers (fixtures)
+  # The registry readers and the release-only scripts, against fixtures rather
+  # than GHCR: the multi-arch shapes the readers must handle are not published
+  # under juherr/steve yet, and the publish path runs only on `release` — the
+  # release gate should not be the first place either is met.
+  hack-tests:
+    name: Registry readers & release scripts (fixtures)
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - run: ./hack/test/registry-readers.sh
+      - run: ./hack/test/release-publish.sh
