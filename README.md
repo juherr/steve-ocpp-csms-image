@@ -152,16 +152,16 @@ the **host** — the interface and port a browser or a charge point reaches from
 outside — and the right side is the **container**, where SteVe actually
 listens.
 
-**Inside the container SteVe listens on `0.0.0.0:8180`, and it should stay
-that way.** That is what the compiled-in `docker` profile sets. Do not point
-`SERVER_HOST` at the machine's LAN address to "make it reachable": that
-address does not exist in the container's network namespace, so Jetty cannot
-bind and the application fails to start — `Failed to start bean
-'webServerStartStop'`, caused by `Cannot assign requested address`. The
-interface is chosen on the host side of the mapping instead —
-`"192.168.1.10:8180:8180"` publishes on one LAN address only,
-`"127.0.0.1:8180:8180"` when a reverse proxy on the same host is the only
-client. The container side, `8180`, does not change.
+**With the Compose setup above, SteVe listens on `0.0.0.0:8180` inside the
+container, and it should stay that way.** That is what the compiled-in
+`docker` profile sets. Do not point `SERVER_HOST` at the machine's LAN address
+to "make it reachable": on the default bridge network that address does not
+exist in the container's network namespace, so Jetty cannot bind and the
+application fails to start — `Failed to start bean 'webServerStartStop'`,
+caused by `Cannot assign requested address`. The interface is chosen on the
+host side of the mapping instead — `"192.168.1.10:8180:8180"` publishes on
+one LAN address only, `"127.0.0.1:8180:8180"` when a reverse proxy on the
+same host is the only client. The container side, `8180`, does not change.
 
 Container-to-container traffic uses the Compose **service name** and the
 **container port**. `DB_IP=steve-db` is resolved by Docker's embedded DNS,
