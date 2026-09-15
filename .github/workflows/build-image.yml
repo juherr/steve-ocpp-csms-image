@@ -63,10 +63,11 @@ concurrency:
 
 env:
   IMAGE: ghcr.io/juherr/steve
-  # Throwaway MariaDB, once for the code generation and again, empty, for each
-  # runtime scenario of hack/migration-test.sh (same defaults as
-  # application-docker.properties). Its credentials only serve the build: no
-  # data, no secret, nothing of it reaches the image.
+  # Throwaway MariaDB, once for the code generation and twice more, started
+  # empty, by hack/migration-test.sh — one instance the fresh and restart
+  # scenarios share, one the upgrade scenario writes with the previous release
+  # first (same defaults as application-docker.properties). Its credentials
+  # only serve the build: no data, no secret, nothing of it reaches the image.
   # renovate: datasource=docker depName=mariadb
   DB_IMAGE: "mariadb:11.8"
 
