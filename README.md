@@ -212,12 +212,23 @@ Stop the application — the database stays up — and take a dump:
 
 ```bash
 docker compose stop steve
-docker compose exec -T steve-db mariadb-dump --single-transaction -u steve -p<your-db-password> stevedb > steve-backup-$(date +%F).sql
+docker compose exec -T steve-db sh -c 'MYSQL_PWD="$MARIADB_PASSWORD" mariadb-dump --single-transaction --routines --events -u steve stevedb' > steve-backup-$(date +%F).sql
 ```
 
-A dump rather than a copy of `./data/mariadb`: it restores into any MariaDB,
-while a copied data directory only restores into the same one. This dump is
-the **only way back** once the schema has moved — see *Downgrading*.
+The password never appears on a command line: `MYSQL_PWD` is set inside the
+container, from the `MARIADB_PASSWORD` it was started with, so there is
+nothing to paste in and nothing left in the shell history. `--routines
+--events` are there for the future: at `steve-3.14.1` the schema is 27 tables
+and 4 views, which a bare dump already covers, but SteVe's migrations have
+carried a stored procedure and an event before, and those two flags are what
+keeps the dump complete if a release brings them back. The `steve` user is
+enough to dump and restore all of it — checked on `mariadb:11.8` with a
+procedure, an event and a trigger.
+
+A logical dump rather than a copy of `./data/mariadb`: it restores across
+MariaDB versions and hosts, a copied data directory only into a matching
+server. Any other backup you trust works too; the dump is the way back this
+procedure relies on — see *Downgrading*.
 
 ### 2. Keep the identity of the stack
 
@@ -226,6 +237,18 @@ database name or the volume: `name: steve` in the Compose file exists so that
 the project is not silently re-created next to the old one, which is how
 upstream users ended up with a second stack and lost track of the first. Do
 not bump `mariadb` in the same change either — one moving part per upgrade.
+
+**If your Compose file predates `name:`**, the project is named after the
+directory, and pinning a *different* name is the very mistake above: `up -d`
+then starts a second project beside the running one, and `docker compose ps`,
+`logs` and `stop` now address the new, empty one. (Measured: the second
+MariaDB cannot lock `./data/mariadb` while the first holds it — `Can't lock
+aria control file … error: 11` — so it never comes up; the original stack
+keeps running, unmanaged.) Read the name in use first, and pin exactly that:
+
+```bash
+docker compose config | head -1
+```
 
 ### 3. Change the image line
 
@@ -290,8 +313,8 @@ in Flyway's history table, and must match the last `Migrating … to version`
 line above:
 
 ```bash
-docker compose exec -T steve-db mariadb -u steve -p<your-db-password> stevedb \
-  -e "SELECT version, success FROM schema_version ORDER BY installed_rank DESC LIMIT 1"
+docker compose exec -T steve-db sh -c 'MYSQL_PWD="$MARIADB_PASSWORD" mariadb -u steve stevedb \
+  -e "SELECT version, success FROM schema_version ORDER BY installed_rank DESC LIMIT 1"'
 ```
 
 ### Downgrading
@@ -303,13 +326,13 @@ hands over to SteVe anyway. Whether that older SteVe then works depends on what
 the newer migrations did. Additive ones go unnoticed (`steve-3.14.1` →
 `steve-3.13.0` boots and signs in, measured); a renamed or dropped column does
 not, and nothing has tested the older release against the newer schema. **A
-downgrade is not a supported path.** The supported way back is the backup from
-step 1:
+downgrade is not a supported path.** The way back this procedure relies on is
+the dump from step 1:
 
 ```bash
 docker compose stop steve
-docker compose exec -T steve-db mariadb -u steve -p<your-db-password> -e "DROP DATABASE stevedb; CREATE DATABASE stevedb"
-docker compose exec -T steve-db mariadb -u steve -p<your-db-password> stevedb < steve-backup-<date>.sql
+docker compose exec -T steve-db sh -c 'MYSQL_PWD="$MARIADB_PASSWORD" mariadb -u steve -e "DROP DATABASE stevedb; CREATE DATABASE stevedb"'
+docker compose exec -T steve-db sh -c 'MYSQL_PWD="$MARIADB_PASSWORD" mariadb -u steve stevedb' < steve-backup-<date>.sql
 ```
 
 Put the previous image line back, `docker compose up -d steve`, and Flyway
