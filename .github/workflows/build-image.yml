@@ -366,7 +366,10 @@ jobs:
   #
   # `needs` waits for both builds to succeed. One failing after the other
   # pushed leaves an untagged digest on GHCR and moves no tag — re-run the
-  # workflow from `release` and the next pair replaces it.
+  # workflow from `release` and the next pair replaces it. The same holds
+  # for a candidate the script refuses: the tag is made only after the
+  # checks, so the platform digests are on GHCR before this job is green,
+  # the tag never before it is.
   publish:
     name: publish the index
     needs: build

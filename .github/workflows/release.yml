@@ -140,6 +140,7 @@ jobs:
             echo
             echo "The digest to pin — the index's — is printed by that run's **publish** job,"
             echo "once both architectures have built and been merged into one tag."
-            echo "It publishes \`ghcr.io/juherr/steve:${steve_ref}\`; nothing is on"
-            echo "GHCR until it goes green."
+            echo "Each architecture is pushed to GHCR by digest, untagged, as soon as its"
+            echo "build is probed; \`ghcr.io/juherr/steve:${steve_ref}\` itself does not move"
+            echo "until the candidate index has passed the publish checks."
           } >> "$GITHUB_STEP_SUMMARY"

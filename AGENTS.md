@@ -20,15 +20,17 @@ this repository — if something must change in SteVe, it changes upstream.
 | `entrypoint.sh` | Runs Flyway migrations against the runtime database, then starts the `.war` |
 | `flyway-callbacks/afterConnect.sql` | Forces `default_storage_engine=InnoDB`; replaces `-initSql`, removed in Flyway 13 |
 | `.github/workflows/build-image.yml` | One native build and probe per architecture, merged into an index on `release` — see its `on:` block for the triggers |
-| `.github/workflows/lint.yml` | hadolint / shellcheck / actionlint, and `hack/test/registry-readers.sh` |
+| `.github/workflows/lint.yml` | hadolint / shellcheck / actionlint, and the two suites under `hack/test/` |
 | `.github/workflows/scan-published.yml` | Weekly Trivy scan of the tags already on GHCR |
 | `.github/workflows/release.yml` | The release, from the Actions tab: preflight, fast-forward `release`, start the build |
 | `.github/workflows/release-drift.yml` | Schedules `hack/release-drift.sh` — see that script for what it compares |
 | `hack/release-drift.sh` | Published image vs the `release` branch; runnable by hand |
 | `hack/release-preflight.sh` | Would releasing HEAD publish anything, or only move a digest; runnable by hand |
 | `hack/migration-test.sh` | Fresh-database migration, restart and upgrade scenarios against the built image; what CI runs after the build, runnable by hand |
-| `hack/image-config.sh` | Image config of a published tag, single manifest or index; what `release-drift.sh`, `release-preflight.sh` and the `CLAUDE.md` recipe read through |
-| `hack/test/` | Offline tests of `image-config.sh` and its two callers, against a fixture registry served by a `curl` shim |
+| `hack/image-config.sh` | Image config of a published tag, single manifest or index; what `release-drift.sh`, `release-preflight.sh`, the two scripts below and the `CLAUDE.md` recipe read through |
+| `hack/check-pushed-digest.sh` | Is the digest a build job pushed the image it probed; run by each build job on `release` |
+| `hack/publish-index.sh` | Checks the two platform digests and the index they would form, then makes the tag and prints the digest to pin; run by the `publish` job on `release` |
+| `hack/test/` | Offline tests of the five scripts above that read the registry, against a fixture registry served by a `curl` shim and a `docker` that records instead of acting |
 | `README.md` | User-facing documentation |
 | `.github/assets/` | Images referenced by `README.md`; outside the build context |
 | `NOTICE` | License aggregation of the produced image — must stay accurate |
@@ -221,12 +223,19 @@ prefer arrays to space-separated strings when a command takes a path list.
 
 The linters are the cheap gate. Run the three steps of
 `.github/workflows/lint.yml` — that file pins the images, so copying the
-commands here would only create a second version to keep in sync — and
-`./hack/test/registry-readers.sh`, which is the whole test suite: the registry
-readers against a fixture registry, no network. A change to
-`hack/image-config.sh` or to either script that reads through it is not
-verified until that passes; a new manifest shape the readers must handle goes
-in as a fixture under `hack/test/registry/` first.
+commands here would only create a second version to keep in sync — and the
+two suites under `hack/test/`, which are the whole test suite, no network:
+`registry-readers.sh` for `image-config.sh` and the two release readers, and
+`release-publish.sh` for the two scripts that run only on `release` —
+`check-pushed-digest.sh` in each build job and `publish-index.sh` in the
+`publish` job. The second suite is the only recurring coverage of the
+publish path, which no pull request exercises: a `docker` shim records every
+`imagetools create -t`, and the suite proves that a candidate failing a check
+never reaches one. A change to any of those five scripts is not verified
+until both suites pass; a new manifest shape goes in as a fixture under
+`hack/test/registry/` first. What has no offline test is the push-by-digest
+export itself — it needs buildx and a registry, and rests on the #27 spike
+and a local `registry:2` run.
 
 A change to a pin — or to a file holding one — is proven by making Renovate say
 so, not by reading `renovate.json`. `--platform=local` runs on the working

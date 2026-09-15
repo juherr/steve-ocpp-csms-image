@@ -13,8 +13,9 @@ descriptions — in English.
 
 ## Verification has a real cost here
 
-The one unit test suite is `hack/test/registry-readers.sh`, and it covers the
-registry readers alone, offline, against fixtures. For the image itself the
+The unit tests are the two suites under `hack/test/`, and they cover the
+scripts that read the registry alone, offline, against fixtures — including
+the two that run only on `release`. For the image itself the
 meaningful checks are a full build, which clones SteVe and runs Maven against a
 live MariaDB (~2 min on CI, once per architecture, longer locally), and
 `hack/migration-test.sh` on the result, which boots the image against an empty
@@ -29,9 +30,12 @@ release as second argument — on a schema that release wrote. So:
   regression in the change under review. `push-by-digest is currently not
   implemented for docker driver` means the `--builder` was dropped and the
   build went to the daemon's default builder — same category.
-- The push-by-digest export, the index merge and the checks on the published
-  index run only on `release`. A pull request proves the builds and the probes
-  on both runners; say so rather than calling the whole workflow verified.
+- The push-by-digest export and the index publication run only on `release`.
+  A pull request proves the builds and the probes on both runners, and
+  `hack/test/release-publish.sh` proves the checks around the export and the
+  tag; the export itself is proven by nothing but the spike and the next
+  release. Say which of the three a change touched rather than calling the
+  workflow verified.
 - For label-only changes, inspecting `.Config.Labels` on the built image is the
   proof; reading the `Dockerfile` is not.
 - For a change to `hack/migration-test.sh`, running it is the proof — against a
