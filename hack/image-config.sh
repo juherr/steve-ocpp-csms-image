@@ -17,9 +17,11 @@
 # platform, annotated `vnd.docker.reference.type: attestation-manifest` — which
 # carry no image config at all.
 #
-# Failures are one line on stderr and exit 1; what that means is the caller's
-# decision, which is how the preflight keeps failing closed while drift keeps
-# reporting only.
+# Every failure exits 1 with one `image-config:` line on stderr saying why;
+# when the registry is the cause, curl's own diagnostic comes first, kept on
+# purpose because it is the part that says 404 rather than 403. What a failure
+# means is the caller's decision, which is how the preflight keeps failing
+# closed while drift keeps reporting only.
 #
 # Usage:  ./hack/image-config.sh <tag-or-digest>
 #         REGISTRY_REPO=aquasecurity/trivy ./hack/image-config.sh latest
@@ -53,7 +55,8 @@ platform=$(jq -r '
     [.manifests[] | select(.annotations["vnd.docker.reference.type"] != "attestation-manifest")]
     | (map(select(.platform.os == "linux" and .platform.architecture == "amd64")) + .)
     | first.digest // empty
-  else empty end' <<<"${manifest}")
+  else empty end' <<<"${manifest}") \
+  || die "the manifest of ${ref} is not JSON"
 
 if [ -n "${platform}" ]; then
   manifest=$(curl -fsS -H "Authorization: Bearer ${token}" -H "Accept: ${accept}" \
@@ -63,7 +66,8 @@ elif jq -e '.manifests' <<<"${manifest}" >/dev/null; then
   die "the index of ${ref} has no image manifest, only attestations"
 fi
 
-config=$(jq -r '.config.digest // empty' <<<"${manifest}")
+config=$(jq -r '.config.digest // empty' <<<"${manifest}") \
+  || die "the platform manifest ${platform} of ${ref} is not JSON"
 [ -n "${config}" ] || die "the manifest of ${ref} carries no config digest"
 
 curl -fsSL -H "Authorization: Bearer ${token}" \
