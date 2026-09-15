@@ -48,6 +48,7 @@ on:
       - ".dockerignore"
       - "entrypoint.sh"
       - "flyway-callbacks/**"
+      - "hack/migration-test.sh"
       - ".github/workflows/build-image.yml"
 
 permissions:
@@ -62,11 +63,13 @@ concurrency:
 
 env:
   IMAGE: ghcr.io/juherr/steve
-  # Throwaway MariaDB for the code generation (same defaults as
-  # application-docker.properties). Its credentials only serve the build: no
-  # data, no secret, nothing of it reaches the image.
+  # Throwaway MariaDB, once for the code generation and twice more, started
+  # empty, by hack/migration-test.sh — one instance the fresh and restart
+  # scenarios share, one the upgrade scenario writes with the previous release
+  # first (same defaults as application-docker.properties). Its credentials
+  # only serve the build: no data, no secret, nothing of it reaches the image.
   # renovate: datasource=docker depName=mariadb
-  BUILD_DB_IMAGE: "mariadb:11.8"
+  DB_IMAGE: "mariadb:11.8"
 
 jobs:
   build:
@@ -103,7 +106,7 @@ jobs:
             -e MARIADB_USER=steve \
             -e MARIADB_PASSWORD=changeme \
             -e TZ="+00:00" \
-            "${BUILD_DB_IMAGE}" --innodb-use-native-aio=0
+            "${DB_IMAGE}" --innodb-use-native-aio=0
 
       - name: Wait for the database to be ready
         run: |
@@ -150,34 +153,74 @@ jobs:
           set -euo pipefail
           docker run --rm --entrypoint curl "${IMAGE}:${STEVE_REF}" --version >/dev/null
 
-      # `flyway version` in the Dockerfile only proves the pruned CLI still
-      # loads — on the Flyway image's own JDK, with no database. This runs the
-      # real entrypoint on the runtime JRE against the build database, which
-      # Maven has just migrated: Flyway must connect through the one driver
-      # kept, find the schema current and hand over to SteVe. The container is
-      # stopped at that hand-over; booting SteVe is not what is being checked.
-      - name: Validate the migration path
+      # The upgrade scenario needs the image users would be coming from: the
+      # highest published tag strictly below the one being built. Strictly —
+      # a Temurin bump rebuilds a tag that is already published, and "the
+      # latest published" would then upgrade the schema from itself. Read from
+      # the registry, which answers with no credentials for a public package;
+      # the REST packages endpoint is scoped to the user account and would not
+      # answer the workflow's GITHUB_TOKEN. Nothing below the current tag —
+      # the very first release — skips the scenario with a notice, never
+      # silently. GHCR unreachable fails the step: a check that quietly drops
+      # its coverage is worse than a re-run.
+      - name: Resolve the previous published release
+        id: previous
         env:
           STEVE_REF: ${{ steps.ref.outputs.steve_ref }}
         run: |
           set -euo pipefail
-          docker run -d --name steve-migrate-probe --network=host \
-            -e DB_IP=127.0.0.1 -e DB_PASSWORD=changeme \
-            "${IMAGE}:${STEVE_REF}"
-          for i in $(seq 1 30); do
-            if docker logs steve-migrate-probe 2>&1 | grep -q '\[entrypoint\] Starting SteVe'; then
-              docker logs steve-migrate-probe 2>&1 | grep -E '^\[entrypoint\]|^Flyway|^Schema|^Successfully'
-              docker rm -f steve-migrate-probe >/dev/null
-              exit 0
-            fi
-            if [ "$(docker inspect --format '{{ .State.Running }}' steve-migrate-probe)" != "true" ]; then
-              break
-            fi
-            echo "Migration not finished yet ($i/30)…"; sleep 2
-          done
-          docker logs steve-migrate-probe
-          docker rm -f steve-migrate-probe >/dev/null
-          echo "The entrypoint did not reach the SteVe hand-over."; exit 1
+          repo="${IMAGE#ghcr.io/}"
+          token=$(curl -fsS "https://ghcr.io/token?scope=repository:${repo}:pull&service=ghcr.io" \
+            | jq -r .token)
+          previous=$(curl -fsS -H "Authorization: Bearer ${token}" \
+            "https://ghcr.io/v2/${repo}/tags/list?n=1000" \
+            | jq -r --arg current "${STEVE_REF}" '
+                def v: ltrimstr("steve-") | split(".") | map(tonumber);
+                [(.tags // [])[] | select(test("^steve-[0-9]+\\.[0-9]+\\.[0-9]+$")) | select(v < ($current | v))]
+                | sort_by(v) | last // empty')
+          if [ -z "${previous}" ]; then
+            echo "::notice::No published release below ${STEVE_REF} — the upgrade scenario will be skipped."
+          else
+            echo "Previous release: ${previous}"
+          fi
+          echo "previous_image=${previous:+${IMAGE}:${previous}}" >> "$GITHUB_OUTPUT"
+
+      # The script's failure path is what makes a red step readable, and the
+      # Cleanup step below would hide a cleanup bug in it. So first, a forced
+      # failure: a container that exits at once (alpine with no command, image
+      # already present from the probe above) must fail the script, print the
+      # database's log, and leave nothing behind — checked here, before the
+      # fallback cleanup gets a chance to. Seconds, since nothing boots.
+      - name: Check migration-test.sh fails loudly and leaves nothing behind
+        run: |
+          set -euo pipefail
+          if out=$(./hack/migration-test.sh alpine 2>&1); then
+            echo "migration-test.sh passed a container that exits at once"; exit 1
+          fi
+          grep -q 'FAIL: .* exited before becoming healthy' <<<"${out}"
+          grep -q 'docker logs steve-it-.*-db' <<<"${out}"
+          [ -z "$(docker ps -aq --filter 'label=steve-it')" ] || { echo "containers left behind"; exit 1; }
+          [ -z "$(docker network ls -q --filter 'label=steve-it')" ] || { echo "network left behind"; exit 1; }
+
+      # `flyway version` in the Dockerfile only proves the pruned CLI still
+      # loads — on the Flyway image's own JDK, with no database. Everything
+      # else is this: the real entrypoint on the runtime JRE, through the one
+      # driver kept, against a database that starts EMPTY — the build database
+      # would not do, Maven has already migrated it. An empty schema must
+      # migrate and SteVe must become healthy; a second container on that
+      # schema must be a Flyway no-op; and the previous published release's
+      # schema must be upgraded by this image. The script prints every log on
+      # failure. It is the same command as under "Building locally" in the
+      # README, so a red step reproduces on a laptop — including the MariaDB
+      # image, which the script reads from DB_IMAGE above rather than being
+      # handed here, so that the path a laptop takes is the path CI tests.
+      - name: Migrate a fresh database, restart, upgrade
+        env:
+          STEVE_REF: ${{ steps.ref.outputs.steve_ref }}
+          PREVIOUS_IMAGE: ${{ steps.previous.outputs.previous_image }}
+        run: |
+          set -euo pipefail
+          ./hack/migration-test.sh "${IMAGE}:${STEVE_REF}" ${PREVIOUS_IMAGE:+"${PREVIOUS_IMAGE}"}
 
       - name: Login to GHCR
         if: github.ref_name == 'release'
@@ -206,5 +249,7 @@ jobs:
       - name: Cleanup
         if: always()
         run: |
-          docker rm -f steve-build-db steve-migrate-probe || true
+          docker rm -f steve-build-db || true
+          docker ps -aq --filter 'label=steve-it' | xargs -r docker rm -f || true
+          docker network ls -q --filter 'label=steve-it' | xargs -r docker network rm || true
           docker logout ghcr.io || true

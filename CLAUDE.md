@@ -13,9 +13,12 @@ descriptions — in English.
 
 ## Verification has a real cost here
 
-There is no test suite. The only meaningful check is a full `docker build`,
-which clones SteVe and runs Maven against a live MariaDB: ~2 min on CI, longer
-locally. So:
+There is no unit test suite. The meaningful checks are a full `docker build`,
+which clones SteVe and runs Maven against a live MariaDB (~2 min on CI, longer
+locally), and `hack/migration-test.sh` on the result, which boots the image
+against an empty MariaDB, boots it again on the schema that left behind, and —
+given a previous release as second argument — on a schema that release wrote.
+So:
 
 - Never claim a change to the `Dockerfile` or the workflow is "verified" without
   having actually built. Say what you ran and what you did not.
@@ -24,6 +27,9 @@ locally. So:
   regression in the change under review.
 - For label-only changes, inspecting `.Config.Labels` on the built image is the
   proof; reading the `Dockerfile` is not.
+- For a change to `hack/migration-test.sh`, running it is the proof — against a
+  published tag when the change does not need a fresh build, which skips the
+  Maven cost entirely.
 
 The rule extends to claims *about the tools themselves*. Comments and
 documentation here assert how hadolint, Trivy, Renovate, BuildKit or GHCR

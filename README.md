@@ -386,6 +386,15 @@ docker rm -f steve-build-db
 `BUILD_DATE` and `VCS_REF` stamp the `org.opencontainers.image.created` and
 `.revision` labels; omit them and those two labels come out empty.
 
+Then the runtime checks CI runs on the built image — an empty MariaDB is
+migrated and SteVe becomes healthy, a second container on that database is a
+Flyway no-op, and, given a previously published tag as second argument, the
+schema that tag wrote is upgraded by the new image:
+
+```bash
+./hack/migration-test.sh steve:local
+```
+
 `--network=host` is what lets the `RUN` steps reach the database on
 `127.0.0.1`. BuildKit only accepts `host`, `none` or `default` for `--network`,
 so a dedicated Docker network is not an option; the legacy builder that allowed
