@@ -8,9 +8,9 @@
 # against what was meant: exactly `linux/amd64` and `linux/arm64`, no
 # attestation entry (an index of one platform, or one with `unknown/unknown`
 # entries, is the shape a build without `--provenance=false` leaves behind —
-# measured on #27), every `org.opencontainers.image.*` label non-empty on
-# each platform manifest, and both built from EXPECTED_REVISION — the commit
-# the workflow runs.
+# measured on #27), the nine `org.opencontainers.image.*` labels present and
+# non-empty on each platform manifest, and both built from EXPECTED_REVISION
+# — the commit the workflow runs.
 #
 # It lives in a file rather than inline in the workflow so that it can be run
 # against a fixture registry and a recording `docker` (hack/test/), where the
@@ -39,6 +39,23 @@ case "${IMAGE}" in ghcr.io/*) ;; *) echo "IMAGE must be under ghcr.io/, got '${I
 export REGISTRY_REPO="${IMAGE#ghcr.io/}"
 
 die() { printf 'publish-index: %s\n' "$1" >&2; exit 1; }
+
+# The labels the Dockerfile's runtime stage sets, by name: each must be on
+# every platform manifest and non-empty. Named rather than "whatever is
+# there is non-empty", so that a LABEL line lost from the Dockerfile refuses
+# the release instead of shipping a tag GHCR can no longer attach to this
+# repository (source) or that names no version.
+labels=(
+  org.opencontainers.image.source
+  org.opencontainers.image.url
+  org.opencontainers.image.documentation
+  org.opencontainers.image.version
+  org.opencontainers.image.created
+  org.opencontainers.image.revision
+  org.opencontainers.image.licenses
+  org.opencontainers.image.title
+  org.opencontainers.image.description
+)
 summary() { cat >>"${GITHUB_STEP_SUMMARY:-/dev/null}"; }
 
 # Everything is checked on the candidate, before the tag exists: the two
@@ -52,8 +69,10 @@ for arch in amd64 arm64; do
     || die "could not read the image config of ${digest}"
   jq -e --arg arch "${arch}" '.os == "linux" and .architecture == $arch' <<<"${config}" >/dev/null \
     || die "${digest} is not a linux/${arch} image: $(jq -c '{os, architecture}' <<<"${config}")"
-  jq -e '.config.Labels | to_entries | all(.value != "")' <<<"${config}" >/dev/null \
-    || die "an empty label on linux/${arch} (${digest})"
+  for label in "${labels[@]}"; do
+    [ -n "$(jq -r --arg l "${label}" '.config.Labels[$l] // empty' <<<"${config}")" ] \
+      || die "linux/${arch} (${digest}) lacks the label ${label}, or it is empty"
+  done
   revision=$(jq -r '.config.Labels["org.opencontainers.image.revision"] // empty' <<<"${config}")
   [ "${revision}" = "${EXPECTED_REVISION}" ] \
     || die "linux/${arch} (${digest}) carries revision '${revision}', expected ${EXPECTED_REVISION}"
