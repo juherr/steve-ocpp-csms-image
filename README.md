@@ -58,7 +58,9 @@ An index tag has three digests, and only one of them is the one to pin: the
 prints as "Digest to pin". The two under `Manifests:` are the platform images
 the index points at; pinning one of those pins one architecture, and a host
 of the other one still pulls it — with a platform-mismatch warning — and then
-runs it only if it can emulate it.
+runs it only if it can emulate it. The output below is the shape a tag from
+the multi-architecture build has; on a tag from before it, the same command
+prints one manifest and no `Manifests:` list.
 
 ```bash
 docker buildx imagetools inspect ghcr.io/juherr/steve:steve-3.14.1
@@ -257,13 +259,14 @@ own for it to be relative to — give it an absolute path on the volume you
 mean. Not verified on each product; there are no vendor-specific steps in
 this document.
 
-**Platform.** Every tag published so far — `steve-3.14.1` included, at the
-time of writing — is `linux/amd64` alone: an ARM NAS or a Raspberry Pi does
-not run it natively, only under emulation where the host offers one, and
-that is not a supported setup. Native `linux/arm64` arrives with the first
-tag the multi-architecture build publishes, an index holding both platforms;
-*Tags* describes both shapes, and `docker buildx imagetools inspect` there
-tells which one a given tag is. Either way the host needs a 64-bit OS.
+**Platform.** A tag from before the multi-architecture build is
+`linux/amd64` alone, and at the time of writing that is every tag published,
+`steve-3.14.1` included: an ARM NAS or a Raspberry Pi does not run those
+natively, only under emulation where the host offers one, and that is not a
+supported setup. Native `linux/arm64` arrives with the first tag the
+multi-architecture build publishes, an index holding both platforms — the
+shape *Tags* shows. `docker buildx imagetools inspect` there tells which of
+the two a given tag is. Either way the host needs a 64-bit OS.
 
 **Restart policy.** `restart: unless-stopped`, as in the Compose file above:
 the stack comes back after a host reboot, and a container stopped on purpose
@@ -309,11 +312,13 @@ management UI: a proxy holding the certificate, forwarding to the container's
 `8180` — published on `127.0.0.1` when the proxy is on the same host, see
 *Networking* — and routing only the UI hostname, so that nothing on the
 public side reaches the OCPP endpoint. For the charge points: a private path,
-LAN or VPN, never the public proxy. There they reach `8180` directly over
-`ws://`, published on that interface alone (`"192.168.1.10:8180:8180"`, as
-*Networking* shows); if they must use `wss://`, a listener of the proxy on
-that private address holds the certificate for them, and it must pass
-WebSocket upgrades through, or they cannot connect.
+never the public proxy. Plain `ws://` straight to `8180`, published on that
+interface alone (`"192.168.1.10:8180:8180"`, as *Networking* shows), is
+cleartext — identifiers, RFID tags and meter values readable by anything on
+that network — so it belongs on a network you hold end to end, a VPN or a
+LAN nothing else is on. Anywhere else, `wss://`: a listener of the proxy on
+that private address holds the certificate for the charge points, and it must
+pass WebSocket upgrades through, or they cannot connect.
 
 ## Upgrading
 
