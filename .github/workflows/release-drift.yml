@@ -39,6 +39,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
+          # The script fetches again, anonymously: the repository is public.
+          persist-credentials: false
 
       - name: Compare the published image with the release branch
         run: ./hack/release-drift.sh

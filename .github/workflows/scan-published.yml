@@ -40,9 +40,10 @@ on:
     - cron: "17 6 * * 1"
   workflow_dispatch:
 
+# Read-only for the workflow; the one write, `security-events` for the SARIF
+# upload, is granted on the job that performs it.
 permissions:
   contents: read
-  security-events: write
 
 concurrency:
   # Not cancel-in-progress: a manual dispatch during the weekly run would
@@ -64,6 +65,8 @@ jobs:
     steps:
       # For hack/scan-targets.sh and the helper it reads through.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
 
       # Asked to the registry, not to /users/juherr/packages/…: that REST
       # endpoint is scoped to the *user* and needs a personal token with
@@ -92,6 +95,9 @@ jobs:
     if: needs.discover.outputs.matrix != '[]'
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    permissions:
+      contents: read
+      security-events: write
     strategy:
       fail-fast: false
       # A matrix rather than a loop in a single job because upload-sarif is an
@@ -107,6 +113,8 @@ jobs:
       # upload-sarif resolves the commit and ref from the checkout in the
       # workspace; without it the workspace is empty and the upload fails.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
 
       # The secret scanner reads the image configuration and build history —
       # where a credential passed through --build-arg or written on a RUN

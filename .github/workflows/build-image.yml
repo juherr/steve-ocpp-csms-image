@@ -66,9 +66,10 @@ on:
       - "hack/publish-index.sh"
       - ".github/workflows/build-image.yml"
 
+# Read-only for the workflow; `packages: write` is granted per job below, on
+# the two that push to GHCR on `release`.
 permissions:
   contents: read
-  packages: write
 
 concurrency:
   # Releases queue rather than cancel each other; pull request runs supersede
@@ -96,6 +97,9 @@ jobs:
     name: build & probe (${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
     strategy:
       # A pull request must report both architectures, not stop at the first.
       fail-fast: false
@@ -115,6 +119,8 @@ jobs:
       digest_arm64: ${{ steps.digest.outputs.digest_arm64 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
 
       # The release comes from the Dockerfile's own ARG — the single place it is
       # pinned in code, so the version a branch would ship and the version its
@@ -376,12 +382,17 @@ jobs:
     if: github.ref_name == 'release'
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: write
     env:
       STEVE_REF: ${{ needs.build.outputs.steve_ref }}
       DIGEST_AMD64: ${{ needs.build.outputs.digest_amd64 }}
       DIGEST_ARM64: ${{ needs.build.outputs.digest_arm64 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
 
       # A digest that did not arrive must not become an index of one platform.
       - name: Check both digests arrived
