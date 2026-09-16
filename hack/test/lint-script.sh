@@ -97,4 +97,16 @@ run "the real lint.yml parses, every run: accounted for" \
   "${script}" -n
 expect_status 0 && expect_out 'lint / hadolint (Dockerfiles) (line ' && expect_out 'hack-tests / run (line ' && expect_out 'renovate-extract / run (line ' && pass
 
+# --- the real workflow's shellcheck runs the pinned image, not the runner's -
+
+# ubuntu-latest ships a shellcheck, so a step written back to a bare
+# `xargs -r shellcheck` would stay green on CI with nothing pinned (#33) —
+# the one linter whose absence from the pins no other check would notice.
+# The step's command, as the dry-run prints it, must run the image variable.
+run "the real lint.yml runs shellcheck from \${SHELLCHECK_IMAGE}, not the runner's" \
+  "${script}" -n lint
+step=$(printf '%s\n' "${out}" | sed -n '/^==> lint \/ shellcheck /,/^==>/p')
+expect_step() { [[ "${step}" == *"$1"* ]] || { fail "shellcheck step lacks '$1'"; return 1; }; }
+expect_status 0 && expect_step 'docker run' && expect_step '${SHELLCHECK_IMAGE}' && pass
+
 exit "${failed}"
