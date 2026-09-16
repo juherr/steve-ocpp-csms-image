@@ -20,7 +20,7 @@ this repository — if something must change in SteVe, it changes upstream.
 | `entrypoint.sh` | Runs Flyway migrations against the runtime database, then starts the `.war` |
 | `flyway-callbacks/afterConnect.sql` | Forces `default_storage_engine=InnoDB`; replaces `-initSql`, removed in Flyway 13 |
 | `.github/workflows/build-image.yml` | One native build and probe per architecture, merged into an index on `release` — see its `on:` block for the triggers |
-| `.github/workflows/lint.yml` | hadolint / shellcheck / actionlint, and the two suites under `hack/test/` |
+| `.github/workflows/lint.yml` | hadolint / shellcheck / actionlint, the three suites under `hack/test/`, and `hack/renovate-extract-check.sh` |
 | `.github/workflows/scan-published.yml` | Weekly Trivy scan of the tags already on GHCR, one job per image `hack/scan-targets.sh` lists |
 | `.github/workflows/release.yml` | The release, from the Actions tab: preflight, fast-forward `release`, start the build |
 | `.github/workflows/release-drift.yml` | Schedules `hack/release-drift.sh` — see that script for what it compares |
@@ -31,7 +31,8 @@ this repository — if something must change in SteVe, it changes upstream.
 | `hack/scan-targets.sh` | The images `scan-published.yml` scans: one (tag, arch) per supported platform each of the newest tags carries; runnable by hand |
 | `hack/check-pushed-digest.sh` | Is the digest a build job pushed the image it probed; run by each build job on `release` |
 | `hack/publish-index.sh` | Checks the two platform digests and the index they would form, then makes the tag and prints the digest to pin; run by the `publish` job on `release` |
-| `hack/test/` | Offline tests of the six scripts above that read the registry, against a fixture registry served by a `curl` shim and a `docker` that records instead of acting |
+| `hack/renovate-extract-check.sh` | Is every pin one Renovate extracts — the `# renovate:` comments and the Markdown examples; run by `lint.yml`, runnable by hand |
+| `hack/test/` | Offline tests of the six scripts above that read the registry, against a fixture registry served by a `curl` shim and a `docker` that records instead of acting, and of the Renovate check against a saved extraction |
 | `README.md` | User-facing documentation |
 | `.github/assets/` | Images referenced by `README.md`; outside the build context |
 | `NOTICE` | License aggregation of the produced image — must stay accurate |
@@ -233,35 +234,41 @@ prefer arrays to space-separated strings when a command takes a path list.
 The linters are the cheap gate. Run the three steps of
 `.github/workflows/lint.yml` — that file pins the images, so copying the
 commands here would only create a second version to keep in sync — and the
-two suites under `hack/test/`, which are the whole test suite, no network:
+three suites under `hack/test/`, which are the whole test suite, no network:
 `registry-readers.sh` for `image-config.sh`, the two release readers and
-`scan-targets.sh`, and `release-publish.sh` for the two scripts that run only
-on `release` — `check-pushed-digest.sh` in each build job and
-`publish-index.sh` in the `publish` job. The second suite is the only
-recurring coverage of the publish path, which no pull request exercises: a
-`docker` shim records every `imagetools create -t`, and the suite proves that
-a candidate failing a check never reaches one. A change to any of those six
-scripts is not verified until both suites pass; a new manifest shape goes in
+`scan-targets.sh`, `release-publish.sh` for the two scripts that run only on
+`release` — `check-pushed-digest.sh` in each build job and `publish-index.sh`
+in the `publish` job — and `renovate-extract.sh` for the Renovate check
+below, against a saved extraction. The second suite is the only recurring
+coverage of the publish path, which no pull request exercises: a `docker`
+shim records every `imagetools create -t`, and the suite proves that a
+candidate failing a check never reaches one. A change to any of those seven
+scripts is not verified until the suites pass; a new manifest shape goes in
 as a fixture under `hack/test/registry/` first. What has no offline test is the push-by-digest
 export itself — it needs buildx and a registry, and rests on the #27 spike
 and a local `registry:2` run.
 
 A change to a pin — or to a file holding one — is proven by making Renovate say
-so, not by reading `renovate.json`. `--platform=local` runs on the working
-directory, and `--dry-run=extract` stops after the extraction phase: no
-datasource queried, no branch, no PR, nothing written.
+so, not by reading `renovate.json`. `hack/renovate-extract-check.sh` runs
+Renovate's own image on the working directory — `--platform=local
+--dry-run=extract` stops after the extraction phase: no datasource queried,
+no branch, no PR, nothing written — and fails when a `# renovate:` comment is
+not inside a `replaceString` of its file, or a Markdown file holds more SteVe
+tag literals in the shapes `renovate.json` declares than Renovate extracted
+from it. `lint.yml` runs it on every pull request, so a README edit that
+leaves a shape is red before it lands; the Renovate image is ~450 MB
+(measured), the one pull in that workflow that is not seconds. A pin that
+the check does not name is unmanaged, whatever the comment next to it says —
+the Dockerfile `FROM` lines and the action SHAs are the built-in managers'
+and are not counted. For which version each pin would move to, run Renovate
+itself without `--dry-run=extract`: `--platform=local` then falls back to
+its `dryRun=lookup` default, which queries the datasources — that one hits
+github.com, so prefix it with `RENOVATE_GITHUB_COM_TOKEN="$(gh auth token)"`
+to stay out of the rate limit.
 
 ```bash
-LOG_LEVEL=debug npx --yes renovate --platform=local --dry-run=extract \
-  | grep -E '"(packageFile|replaceString)"'
+./hack/renovate-extract-check.sh
 ```
-
-Every pin must appear as a `replaceString` under its `packageFile`; a pin that
-is missing there is unmanaged, whatever the comment next to it says. Drop
-`--dry-run=extract` and `--platform=local` falls back to its `dryRun=lookup`
-default, which also queries the datasources and says which version each pin
-would move to — that one hits github.com, so prefix it with
-`RENOVATE_GITHUB_COM_TOKEN="$(gh auth token)"` to stay out of the rate limit.
 
 Build locally with the block under **Building locally** in `README.md`. It is
 one copy of those commands on purpose: the README claims they are exactly what

@@ -1,0 +1,68 @@
+{
+  "name": "renovate",
+  "level": 20,
+  "msg": "Extracted dependencies",
+  "packageFiles": {
+    "dockerfile": [
+      {
+        "packageFile": "Dockerfile",
+        "deps": [
+          {
+            "depName": "eclipse-temurin",
+            "currentValue": "25-jre",
+            "replaceString": "eclipse-temurin:25-jre",
+            "datasource": "docker",
+            "depType": "final"
+          }
+        ]
+      }
+    ],
+    "regex": [
+      {
+        "packageFile": "Dockerfile",
+        "deps": [
+          {
+            "depName": "steve-community/steve",
+            "currentValue": "steve-1.0.1",
+            "datasource": "github-releases",
+            "replaceString": "# renovate: datasource=github-releases depName=steve-community/steve\nARG STEVE_REF=steve-1.0.1"
+          }
+        ]
+      },
+      {
+        "packageFile": ".github/workflows/lint.yml",
+        "deps": [
+          {
+            "depName": "hadolint/hadolint",
+            "currentValue": "v2.0.0",
+            "datasource": "docker",
+            "replaceString": "# renovate: datasource=docker depName=hadolint/hadolint\n  HADOLINT_IMAGE: \"hadolint/hadolint:v2.0.0\""
+          },
+          {
+            "depName": "renovate/renovate",
+            "currentValue": "1.0.0",
+            "datasource": "docker",
+            "replaceString": "# renovate: datasource=docker depName=renovate/renovate\n  RENOVATE_IMAGE: \"renovate/renovate:1.0.0\""
+          }
+        ]
+      },
+      {
+        "packageFile": "README.md",
+        "deps": [
+          {
+            "depName": "steve-community/steve",
+            "currentValue": "steve-1.0.1",
+            "datasource": "github-releases",
+            "replaceString": "ghcr.io/juherr/steve:steve-1.0.1"
+          },
+          {
+            "depName": "steve-community/steve",
+            "currentValue": "steve-1.0.1",
+            "datasource": "github-releases",
+            "replaceString": "STEVE_REF=steve-1.0.1"
+          }
+        ]
+      }
+    ]
+  }
+}
