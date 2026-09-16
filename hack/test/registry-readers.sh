@@ -29,6 +29,7 @@ here=$(cd "$(dirname "$0")" && pwd)
 helper="${HACK_DIR}/image-config.sh"
 preflight="${HACK_DIR}/release-preflight.sh"
 drift="${HACK_DIR}/release-drift.sh"
+targets="${HACK_DIR}/scan-targets.sh"
 
 setup_fixtures
 printf 'ARG STEVE_REF=steve-1.0.1\n' > "${repo}/Dockerfile"
@@ -119,5 +120,42 @@ run 'drift warns and exits 0 when the helper cannot resolve the tag' \
 expect_status 0 && expect_err 'WARNING: Could not read the image config of steve-1.0.3' && pass
 
 printf 'ARG STEVE_REF=steve-1.0.1\n' > "${repo}/Dockerfile"
+
+# --- scan targets -----------------------------------------------------------
+# One (tag, arch) per platform the tag actually carries, of the two the build
+# produces. Trivy given --platform for a platform a single manifest is not
+# does not fail, it scans the manifest (measured, 0.74.0) — so a target the
+# tag does not carry would file findings under the wrong category.
+
+run 'targets: one per platform carried — a single manifest gives one, an index two' \
+  "${targets}"
+expect_status 0 \
+  && expect_out '[{"tag":"steve-1.0.0","arch":"amd64"},{"tag":"steve-1.0.1","arch":"amd64"},{"tag":"steve-1.0.1","arch":"arm64"}]' \
+  && pass
+
+tags_list="${FAKE_REGISTRY}/v2/juherr/steve/tags/list"
+
+echo '{"name":"juherr/steve","tags":["steve-1.0.2"]}' > "${tags_list}"
+run 'targets: an index without amd64 gives no amd64 target, and none for a platform the build does not produce' \
+  "${targets}"
+expect_status 0 && expect_out '[{"tag":"steve-1.0.2","arch":"arm64"}]' && pass
+
+echo '{"name":"juherr/steve","tags":["steve-1.0.2","latest","steve-0.9.0","steve-1.0.0","steve-1.0.1","steve-1.0.10"]}' > "${tags_list}"
+run 'targets: the three highest release tags by numeric version, other tags ignored' \
+  "${targets}"
+expect_status 0 \
+  && expect_out '[{"tag":"steve-1.0.1","arch":"amd64"},{"tag":"steve-1.0.1","arch":"arm64"},{"tag":"steve-1.0.2","arch":"arm64"},{"tag":"steve-1.0.10","arch":"amd64"}]' \
+  && pass
+
+echo '{"name":"juherr/steve","tags":["steve-1.0.0","steve-1.0.3"]}' > "${tags_list}"
+run 'targets: a tag the helper cannot read fails the listing, no partial matrix' \
+  "${targets}"
+expect_status 1 && expect_err 'scan-targets: could not read steve-1.0.3' && expect_err 'image-config:' \
+  && { [ -z "${out}" ] || fail "expected no matrix on stdout"; } && pass
+
+echo '{"name":"juherr/steve","tags":["latest"]}' > "${tags_list}"
+run 'targets: no release tag gives an empty matrix' \
+  "${targets}"
+expect_status 0 && expect_out '[]' && pass
 
 exit "${failed}"

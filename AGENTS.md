@@ -21,16 +21,17 @@ this repository — if something must change in SteVe, it changes upstream.
 | `flyway-callbacks/afterConnect.sql` | Forces `default_storage_engine=InnoDB`; replaces `-initSql`, removed in Flyway 13 |
 | `.github/workflows/build-image.yml` | One native build and probe per architecture, merged into an index on `release` — see its `on:` block for the triggers |
 | `.github/workflows/lint.yml` | hadolint / shellcheck / actionlint, and the two suites under `hack/test/` |
-| `.github/workflows/scan-published.yml` | Weekly Trivy scan of the tags already on GHCR, each platform separately |
+| `.github/workflows/scan-published.yml` | Weekly Trivy scan of the tags already on GHCR, one job per image `hack/scan-targets.sh` lists |
 | `.github/workflows/release.yml` | The release, from the Actions tab: preflight, fast-forward `release`, start the build |
 | `.github/workflows/release-drift.yml` | Schedules `hack/release-drift.sh` — see that script for what it compares |
 | `hack/release-drift.sh` | Published image vs the `release` branch; runnable by hand |
 | `hack/release-preflight.sh` | Would releasing HEAD publish anything, or only move a digest; runnable by hand |
 | `hack/migration-test.sh` | Fresh-database migration, restart and upgrade scenarios against the built image; what CI runs after the build, runnable by hand |
-| `hack/image-config.sh` | Image config of a published tag, single manifest or index; what `release-drift.sh`, `release-preflight.sh`, the two scripts below, both workflows that ask for one platform and the `CLAUDE.md` recipe read through |
+| `hack/image-config.sh` | Image config of a published tag, single manifest or index; what `release-drift.sh`, `release-preflight.sh`, the three scripts below, the build workflow and the `CLAUDE.md` recipe read through |
+| `hack/scan-targets.sh` | The images `scan-published.yml` scans: one (tag, arch) per supported platform each of the newest tags carries; runnable by hand |
 | `hack/check-pushed-digest.sh` | Is the digest a build job pushed the image it probed; run by each build job on `release` |
 | `hack/publish-index.sh` | Checks the two platform digests and the index they would form, then makes the tag and prints the digest to pin; run by the `publish` job on `release` |
-| `hack/test/` | Offline tests of the five scripts above that read the registry, against a fixture registry served by a `curl` shim and a `docker` that records instead of acting |
+| `hack/test/` | Offline tests of the six scripts above that read the registry, against a fixture registry served by a `curl` shim and a `docker` that records instead of acting |
 | `README.md` | User-facing documentation |
 | `.github/assets/` | Images referenced by `README.md`; outside the build context |
 | `NOTICE` | License aggregation of the produced image — must stay accurate |
@@ -186,13 +187,14 @@ or swapping a component changes the obligations.
   worth answering is whether a *published* tag has drifted. It is report-only
   (`--exit-code 0`) — upstream CVEs are not this repository's to fix, and
   failing would only block a release no worse than what is already out there.
-  Each platform of a tag is scanned under its own category,
+  Each supported platform a tag carries is scanned under its own category,
   `trivy-<tag>-<arch>`: Trivy on an index takes the runner's platform and
-  never looks at the other. Which platforms a tag carries is asked to the
-  registry through `hack/image-config.sh`, not fixed to the two the build
-  produces — on the single-manifest tags from before multi-arch, Trivy given
+  never looks at the other. `hack/scan-targets.sh` asks the registry which of
+  the two platforms the build produces a tag carries, rather than assuming
+  both — on the single-manifest tags from before multi-arch, Trivy given
   `--platform linux/arm64` scans the amd64 image without a word (measured),
-  and a fixed pair would file those findings under an `-arm64` category.
+  and a fixed pair would file those findings under an `-arm64` category. A
+  third architecture added to the build has to be added there too.
 - **No SBOM.** A `syft` SBOM was tried and removed: as a workflow artifact it
   expires and no consumer can discover it, and attaching it to the image needs
   buildx attestations — the `--provenance=false` on the export is the same
@@ -232,15 +234,15 @@ The linters are the cheap gate. Run the three steps of
 `.github/workflows/lint.yml` — that file pins the images, so copying the
 commands here would only create a second version to keep in sync — and the
 two suites under `hack/test/`, which are the whole test suite, no network:
-`registry-readers.sh` for `image-config.sh` and the two release readers, and
-`release-publish.sh` for the two scripts that run only on `release` —
-`check-pushed-digest.sh` in each build job and `publish-index.sh` in the
-`publish` job. The second suite is the only recurring coverage of the
-publish path, which no pull request exercises: a `docker` shim records every
-`imagetools create -t`, and the suite proves that a candidate failing a check
-never reaches one. A change to any of those five scripts is not verified
-until both suites pass; a new manifest shape goes in as a fixture under
-`hack/test/registry/` first. What has no offline test is the push-by-digest
+`registry-readers.sh` for `image-config.sh`, the two release readers and
+`scan-targets.sh`, and `release-publish.sh` for the two scripts that run only
+on `release` — `check-pushed-digest.sh` in each build job and
+`publish-index.sh` in the `publish` job. The second suite is the only
+recurring coverage of the publish path, which no pull request exercises: a
+`docker` shim records every `imagetools create -t`, and the suite proves that
+a candidate failing a check never reaches one. A change to any of those six
+scripts is not verified until both suites pass; a new manifest shape goes in
+as a fixture under `hack/test/registry/` first. What has no offline test is the push-by-digest
 export itself — it needs buildx and a registry, and rests on the #27 spike
 and a local `registry:2` run.
 

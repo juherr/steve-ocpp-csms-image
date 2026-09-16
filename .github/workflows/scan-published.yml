@@ -15,15 +15,18 @@
 # SteVe release is already pinned in the Dockerfile and echoed in the README,
 # which move together (see AGENTS.md); one more copy would rot.
 #
-# Every platform of a tag is scanned, not just the runner's. Given an index,
-# Trivy picks the platform matching the runner — linux/amd64 — and the arm64
-# manifest is never looked at. The two are built from the same Dockerfile at
-# the same moment, with the same Ubuntu package versions and the same jars, so
-# the two reports are expected to be *almost* identical; the JRE, libc and
-# everything else compiled per architecture is where "almost" lives, and that
-# difference is the thing worth seeing. Scanning amd64 only and documenting it
-# was considered and rejected: the scan is report-only, halving it saves a few
-# runner minutes a week and buys a blind spot.
+# Every supported platform a tag carries is scanned, not just the runner's:
+# given an index, Trivy picks the platform matching the runner — linux/amd64 —
+# and the arm64 manifest is never looked at. The two are built from the same
+# Dockerfile at the same moment, with the same Ubuntu package versions and the
+# same jars, so the two reports are expected to be *almost* identical; the
+# JRE, libc and everything else compiled per architecture is where "almost"
+# lives, and that difference is the thing worth seeing. Scanning amd64 only
+# and documenting it was considered and rejected: the scan is report-only,
+# halving it saves a few runner minutes a week and buys a blind spot.
+# "Supported" is the two platforms the build produces: a third architecture
+# added to the build has to be added to hack/scan-targets.sh as well, or it
+# ships unscanned.
 #
 # GitHub disables scheduled workflows after 60 days without repository activity;
 # on a packaging repository that can happen between two SteVe releases. If the
@@ -53,13 +56,13 @@ env:
 
 jobs:
   discover:
-    name: list published tags and platforms
+    name: list the images to scan
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
-      matrix: ${{ steps.matrix.outputs.matrix }}
+      matrix: ${{ steps.targets.outputs.matrix }}
     steps:
-      # For hack/image-config.sh, which the platform listing below reads through.
+      # For hack/scan-targets.sh and the helper it reads through.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       # Asked to the registry, not to /users/juherr/packages/…: that REST
@@ -69,61 +72,17 @@ jobs:
       # permission at all — and no pagination handling, unlike `gh api
       # --paginate`, which emits one JSON document per page and would quietly
       # write a multi-line value to GITHUB_OUTPUT past 30 versions.
-      - name: List the release tags on GHCR
-        id: tags
-        run: |
-          set -euo pipefail
-          token=$(curl -fsS \
-            "https://ghcr.io/token?scope=repository:${REGISTRY_REPO}:pull&service=ghcr.io" \
-            | jq -r .token)
-          # Anything that is not a steve-X.Y.Z release tag is not ours to
-          # monitor — same shape the build validates ARG STEVE_REF against.
-          #
-          # Only the three most recent releases: an immutable old tag's CVE list
-          # only ever grows and the answer for whoever pinned it is always "move
-          # up", which the newest scan already says. Scanning them forever would
-          # leave one stale `trivy-<retired tag>-<arch>` category in the
-          # Security tab per release and platform, for ever.
-          #
-          # sort_by on the numeric components, not plain sort: lexically
-          # steve-3.9.0 sorts after steve-3.13.0.
-          tags=$(curl -fsS -H "Authorization: Bearer ${token}" \
-            "https://ghcr.io/v2/${REGISTRY_REPO}/tags/list?n=1000" \
-            | jq -c '[(.tags // [])[] | select(test("^steve-[0-9]+\\.[0-9]+\\.[0-9]+$"))]
-                     | sort_by(ltrimstr("steve-") | split(".") | map(tonumber))
-                     | .[-3:]')
-          echo "Tags to scan: ${tags}"
-          echo "tags=${tags}" >> "$GITHUB_OUTPUT"
-
-      # The platforms are asked to the registry too, rather than fixed to
-      # amd64 and arm64 here: the tags published before the image went
-      # multi-arch are single linux/amd64 manifests, and Trivy given
-      # `--platform linux/arm64` on one of those does not fail — it ignores the
-      # option and scans the amd64 image (measured, 0.74.0). A fixed pair would
-      # thus file amd64 findings under an `-arm64` category for those tags.
       #
-      # Same test the build workflow makes before its upgrade scenario: ask
-      # image-config.sh for the architecture, and keep the pair only when the
-      # answer is the one asked for — on an index without that platform, and
-      # on a single manifest, the helper answers with what the tag does carry.
-      # A tag the helper cannot read fails this job: that is a broken
+      # Which tags, and which platforms of each, is the script's to decide —
+      # see its header — so that the answer is proven offline by
+      # hack/test/registry-readers.sh rather than by the weekly run. It fails
+      # on a tag it cannot read, and so does this job: that is a broken
       # publication, not a scan to skip quietly.
-      - name: List the platforms of each tag
-        id: matrix
-        env:
-          TAGS: ${{ steps.tags.outputs.tags }}
+      - name: List the release tags on GHCR and the platforms of each
+        id: targets
         run: |
           set -euo pipefail
-          matrix=$(
-            for tag in $(jq -r '.[]' <<<"${TAGS}"); do
-              for arch in amd64 arm64; do
-                found=$(IMAGE_ARCH="${arch}" ./hack/image-config.sh "${tag}" | jq -r '.architecture // empty')
-                if [ "${found}" = "${arch}" ]; then
-                  jq -cn --arg tag "${tag}" --arg arch "${arch}" '{tag: $tag, arch: $arch}'
-                fi
-              done
-            done | jq -sc .
-          )
+          matrix=$(./hack/scan-targets.sh)
           echo "Images to scan: ${matrix}"
           echo "matrix=${matrix}" >> "$GITHUB_OUTPUT"
 
@@ -161,7 +120,8 @@ jobs:
       #
       # --platform selects the entry of the index to scan; the runner's own
       # architecture does not matter, Trivy reads the layers, it does not run
-      # them. On the single-manifest tags it is a no-op, see `discover`.
+      # them. On the single-manifest tags it is a no-op, which is why
+      # hack/scan-targets.sh only ever asks for a platform the tag carries.
       - name: Scan ${{ matrix.tag }} linux/${{ matrix.arch }}
         env:
           TAG: ${{ matrix.tag }}

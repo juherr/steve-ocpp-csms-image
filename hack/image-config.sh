@@ -17,11 +17,11 @@
 # readers set IMAGE_ARCH and read `.architecture` off the answer, which is why
 # a single manifest comes back unfiltered: the build workflow, for its
 # runner's own architecture before running the upgrade scenario against the
-# previous release, which may predate the arm64 variant; and the scan
-# workflow, once per architecture, to learn which platforms a tag carries. The
-# entries skipped are buildx attestations — `unknown/unknown` platform,
-# annotated `vnd.docker.reference.type: attestation-manifest` — which carry no
-# image config at all.
+# previous release, which may predate the arm64 variant; and
+# hack/scan-targets.sh, once per architecture, to learn which platforms a tag
+# carries. The entries skipped are buildx attestations — `unknown/unknown`
+# platform, annotated `vnd.docker.reference.type: attestation-manifest` —
+# which carry no image config at all.
 #
 # Every failure exits 1 with one `image-config:` line on stderr saying why;
 # when the registry is the cause, curl's own diagnostic comes first, kept on
