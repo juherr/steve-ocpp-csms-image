@@ -32,7 +32,7 @@ this repository — if something must change in SteVe, it changes upstream.
 | `hack/image-config.sh` | Image config of a published tag, single manifest or index; what `release-drift.sh`, `release-preflight.sh`, the three scripts below, the build workflow and the `CLAUDE.md` recipe read through |
 | `hack/scan-targets.sh` | The images `scan-published.yml` scans: one (tag, arch) per supported platform each of the newest tags carries; runnable by hand |
 | `hack/check-pushed-digest.sh` | Is the digest a build job pushed the image it probed; run by each build job on `release` |
-| `hack/publish-index.sh` | Checks the two platform digests and the index they would form, then makes the tag and prints the digest to pin; run by the `publish` job on `release` |
+| `hack/publish-index.sh` | Checks the two platform digests and the index they would form, then makes the tag — the index annotated with the manifests' `description`, which is where GHCR reads a multi-arch package's description — and prints the digest to pin; run by the `publish` job on `release` |
 | `hack/renovate-extract-check.sh` | Is every pin one Renovate extracts — the `# renovate:` comments, the Markdown examples and the example manifests; run by `lint.yml`, runnable by hand |
 | `hack/lint.sh` | The steps of `lint.yml`, run locally — read out of the workflow, pins and commands, not copied from it |
 | `hack/check-links.sh` | lychee over every tracked Markdown file and `NOTICE`; what `check-links.yml` runs, runnable by hand |
@@ -128,6 +128,14 @@ or swapping a component changes the obligations.
   `docker/setup-buildx-action`. Labels are in the `Dockerfile`, which keeps
   them identical for local and CI builds. Verified present on the published
   image — `metadata-action` would add a second source of truth for no gain.
+  The one exception is read, not written twice: GHCR takes a multi-arch
+  package's description from the *index's* annotations, not from the
+  platform manifests' labels, and the first multi-arch `steve-3.14.1` showed
+  "No description provided" with the label present on both manifests
+  (measured). `hack/publish-index.sh` therefore copies
+  `org.opencontainers.image.description` from the manifests onto the index
+  as an annotation — the `Dockerfile` stays the source, the index repeats it,
+  and the two platforms have to agree on it or the release is refused.
   The builder is one `docker buildx create` line, the same one the README
   runs locally; `setup-buildx-action` would create it with a different
   network, and its documented way to host networking is the entitlement that

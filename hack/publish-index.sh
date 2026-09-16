@@ -12,6 +12,13 @@
 # non-empty on each platform manifest, and both built from EXPECTED_REVISION
 # — the commit the workflow runs.
 #
+# The index itself carries one annotation, `org.opencontainers.image.description`,
+# copied from the platform manifests' label: GHCR reads a multi-arch package's
+# description from the index, not from the manifests, and without it the
+# package page says "No description provided" (measured on the first
+# multi-arch steve-3.14.1). The Dockerfile's LABEL stays the one source; the
+# index repeats it, and the two platforms have to agree on it.
+#
 # It lives in a file rather than inline in the workflow so that it can be run
 # against a fixture registry and a recording `docker` (hack/test/), where the
 # invariants above are red/green tests instead of comments.
@@ -76,10 +83,19 @@ for arch in amd64 arm64; do
   revision=$(jq -r '.config.Labels["org.opencontainers.image.revision"] // empty' <<<"${config}")
   [ "${revision}" = "${EXPECTED_REVISION}" ] \
     || die "linux/${arch} (${digest}) carries revision '${revision}', expected ${EXPECTED_REVISION}"
+  label_description=$(jq -r '.config.Labels["org.opencontainers.image.description"]' <<<"${config}")
+  if [ -z "${description:-}" ]; then
+    description="${label_description}"
+  elif [ "${label_description}" != "${description}" ]; then
+    die "linux/${arch} (${digest}) differs on org.opencontainers.image.description: '${label_description}' vs '${description}'"
+  fi
 done
+annotation="index:org.opencontainers.image.description=${description}"
 
-candidate=$(docker buildx imagetools create --dry-run "${IMAGE}@${amd64}" "${IMAGE}@${arm64}") \
+candidate=$(docker buildx imagetools create --dry-run --annotation "${annotation}" "${IMAGE}@${amd64}" "${IMAGE}@${arm64}") \
   || die "could not compute the index of ${amd64} and ${arm64}"
+jq -e --arg d "${description}" '.annotations["org.opencontainers.image.description"] == $d' <<<"${candidate}" >/dev/null \
+  || die "the index would not carry the description as its annotation: $(jq -c '.annotations' <<<"${candidate}")"
 jq -e '[.manifests[].platform | "\(.os)/\(.architecture)"] | sort == ["linux/amd64", "linux/arm64"]' \
   <<<"${candidate}" >/dev/null \
   || die "the index would not hold exactly linux/amd64 and linux/arm64: $(jq -c '[.manifests[].platform]' <<<"${candidate}")"
@@ -87,15 +103,15 @@ jq -e --arg amd64 "${amd64}" --arg arm64 "${arm64}" \
   '[.manifests[].digest] | sort == ([$amd64, $arm64] | sort)' <<<"${candidate}" >/dev/null \
   || die "the index would not point at the two digests given: $(jq -c '[.manifests[].digest]' <<<"${candidate}")"
 
-docker buildx imagetools create -t "${IMAGE}:${tag}" "${IMAGE}@${amd64}" "${IMAGE}@${arm64}"
+docker buildx imagetools create -t "${IMAGE}:${tag}" --annotation "${annotation}" "${IMAGE}@${amd64}" "${IMAGE}@${arm64}"
 
 # Read back: the tag must now resolve to the candidate that was checked. A
 # mismatch here is a registry-side surprise and exits 1 with the tag already
 # moved, which is why it is said in so many words.
 published=$(docker buildx imagetools inspect "${IMAGE}:${tag}" --format '{{ json .Manifest }}') \
   || die "could not read back ${IMAGE}:${tag} — the tag has been created, check it by hand"
-if [ "$(jq -cS '.manifests' <<<"${published}")" != "$(jq -cS '.manifests' <<<"${candidate}")" ]; then
-  die "${IMAGE}:${tag} was created but does not read back as the candidate that was checked: $(jq -c '.manifests' <<<"${published}")"
+if [ "$(jq -cS '{manifests, annotations}' <<<"${published}")" != "$(jq -cS '{manifests, annotations}' <<<"${candidate}")" ]; then
+  die "${IMAGE}:${tag} was created but does not read back as the candidate that was checked: $(jq -c '{manifests, annotations}' <<<"${published}")"
 fi
 
 index=$(docker buildx imagetools inspect "${IMAGE}:${tag}" --format '{{ .Manifest.Digest }}')
