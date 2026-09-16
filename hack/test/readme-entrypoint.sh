@@ -22,12 +22,20 @@ root=$(cd "${here}/../.." && pwd)
 entrypoint="${root}/entrypoint.sh"
 readme="${root}/README.md"
 
-# Only one JVM line sets the value; two would be two answers.
-set_in_entrypoint=$(sed -n 's/.*-XX:MaxRAMPercentage=\([0-9][0-9]*\(\.[0-9][0-9]*\)\{0,1\}\).*/\1/p' "${entrypoint}")
-case "${set_in_entrypoint}" in
-  '')  echo "FAIL entrypoint.sh sets no -XX:MaxRAMPercentage" >&2; exit 1 ;;
-  *$'\n'*) echo "FAIL entrypoint.sh sets -XX:MaxRAMPercentage more than once" >&2; exit 1 ;;
+# Exactly one option, counted per occurrence and not per line: two on the
+# same `exec java` line would be two answers as much as two lines, and a
+# line-wise read would report only the last of them.
+occurrences=$({ grep -o -- '-XX:MaxRAMPercentage=' "${entrypoint}" || true; } | wc -l | tr -d ' ')
+case "${occurrences}" in
+  0) echo "FAIL entrypoint.sh sets no -XX:MaxRAMPercentage" >&2; exit 1 ;;
+  1) ;;
+  *) echo "FAIL entrypoint.sh sets -XX:MaxRAMPercentage ${occurrences} times" >&2; exit 1 ;;
 esac
+set_in_entrypoint=$({ grep -oE -- '-XX:MaxRAMPercentage=[0-9]+(\.[0-9]+)?' "${entrypoint}" || true; } | sed 's/^-XX:MaxRAMPercentage=//')
+if [ -z "${set_in_entrypoint}" ]; then
+  echo "FAIL entrypoint.sh sets -XX:MaxRAMPercentage to something that is not a number" >&2
+  exit 1
+fi
 
 documented=$(grep -oE 'MaxRAMPercentage=[0-9]+(\.[0-9]+)?|[0-9]+(\.[0-9]+)? % of' "${readme}" | grep -oE '[0-9]+(\.[0-9]+)?' || true)
 if [ -z "${documented}" ]; then
