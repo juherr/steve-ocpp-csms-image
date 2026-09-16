@@ -13,11 +13,12 @@ descriptions — in English.
 
 ## Verification has a real cost here
 
-The unit tests are the five suites under `hack/test/`, and they cover the
+The unit tests are the six suites under `hack/test/`, and they cover the
 scripts that read the registry — including the two that run only on
 `release` — the Renovate check, the README's `MaxRAMPercentage` against
-`entrypoint.sh`, and `hack/lint.sh` — the local way to run `lint.yml`'s
-steps — alone, offline, against fixtures where they read one. For
+`entrypoint.sh`, `hack/lint.sh` — the local way to run `lint.yml`'s
+steps — and the link check's handling of lychee, alone, offline, against
+fixtures where they read one. For
 the image itself the meaningful checks are a full build, which clones SteVe
 and runs Maven against a live MariaDB (~2 min on CI, once per architecture,
 longer locally), and

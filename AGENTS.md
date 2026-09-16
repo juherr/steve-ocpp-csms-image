@@ -20,10 +20,11 @@ this repository — if something must change in SteVe, it changes upstream.
 | `entrypoint.sh` | Runs Flyway migrations against the runtime database, then starts the `.war` |
 | `flyway-callbacks/afterConnect.sql` | Forces `default_storage_engine=InnoDB`; replaces `-initSql`, removed in Flyway 13 |
 | `.github/workflows/build-image.yml` | One native build and probe per architecture, merged into an index on `release` — see its `on:` block for the triggers |
-| `.github/workflows/lint.yml` | hadolint / `docker build --check` / shellcheck / actionlint / zizmor / kubeconform, the five suites under `hack/test/`, `renovate-config-validator` and `hack/renovate-extract-check.sh` |
+| `.github/workflows/lint.yml` | hadolint / `docker build --check` / shellcheck / actionlint / zizmor / kubeconform, the six suites under `hack/test/`, `renovate-config-validator` and `hack/renovate-extract-check.sh` |
 | `.github/workflows/scan-published.yml` | Weekly Trivy scan of the tags already on GHCR, one job per image `hack/scan-targets.sh` lists |
 | `.github/workflows/release.yml` | The release, from the Actions tab: preflight, fast-forward `release`, start the build |
 | `.github/workflows/release-drift.yml` | Schedules `hack/release-drift.sh` — see that script for what it compares |
+| `.github/workflows/check-links.yml` | Schedules `hack/check-links.sh` weekly, report-only: a broken link is a warning and a step summary, never a red run |
 | `hack/release-drift.sh` | Published image vs the `release` branch; runnable by hand |
 | `hack/release-preflight.sh` | Would releasing HEAD publish anything, or only move a digest; runnable by hand |
 | `hack/migration-test.sh` | Fresh-database migration, restart and upgrade scenarios against the built image; what CI runs after the build, runnable by hand |
@@ -34,7 +35,8 @@ this repository — if something must change in SteVe, it changes upstream.
 | `hack/publish-index.sh` | Checks the two platform digests and the index they would form, then makes the tag and prints the digest to pin; run by the `publish` job on `release` |
 | `hack/renovate-extract-check.sh` | Is every pin one Renovate extracts — the `# renovate:` comments, the Markdown examples and the example manifests; run by `lint.yml`, runnable by hand |
 | `hack/lint.sh` | The steps of `lint.yml`, run locally — read out of the workflow, pins and commands, not copied from it |
-| `hack/test/` | Offline tests of the six scripts above that read the registry, against a fixture registry served by a `curl` shim and a `docker` that records instead of acting, of the Renovate check against a saved extraction, of the README's `MaxRAMPercentage` against `entrypoint.sh`, and of `hack/lint.sh` against a fixture workflow |
+| `hack/check-links.sh` | lychee over every tracked Markdown file and `NOTICE`; what `check-links.yml` runs, runnable by hand |
+| `hack/test/` | Offline tests of the six scripts above that read the registry, against a fixture registry served by a `curl` shim and a `docker` that records instead of acting, of the Renovate check against a saved extraction, of the README's `MaxRAMPercentage` against `entrypoint.sh`, of `hack/lint.sh` against a fixture workflow, and of `hack/check-links.sh` against a `docker` shim that replays lychee's exit codes |
 | `README.md` | User-facing documentation |
 | `examples/kubernetes/` | Reference `Deployment` + `Service` and their README — an example, not a chart; schema-checked by kubeconform in `lint.yml`, brought up in kind by `hack/k8s-example-test.sh` on every build |
 | `.github/assets/` | Images referenced by `README.md`; outside the build context |
@@ -207,6 +209,17 @@ or swapping a component changes the obligations.
   `--platform linux/arm64` scans the amd64 image without a word (measured),
   and a fixed pair would file those findings under an `-arm64` category. A
   third architecture added to the build has to be added there too.
+- **The documentation links are checked weekly, not on the pull request.**
+  Same reasoning: a link works the day it is added and breaks months later,
+  when the page it points at moves. `check-links.yml` runs
+  `hack/check-links.sh` — lychee over every tracked Markdown file and
+  `NOTICE`, so a document added later is checked on arrival — report-only: a
+  broken link is a `::warning::` and the report in the step summary, never a
+  red run. Not in `lint.yml`: it needs the network, and a pull-request gate
+  that goes red for another site's outage is a gate people learn to scroll
+  past. A lychee that could not check at all does fail the run — that is no
+  answer, not a clean tree. The one redirect it reports today,
+  `steve-community/steve.git` in `NOTICE`, is a clone URL and stays.
 - **No SBOM.** A `syft` SBOM was tried and removed: as a workflow artifact it
   expires and no consumer can discover it, and attaching it to the image needs
   buildx attestations — the `--provenance=false` on the export is the same
@@ -255,7 +268,7 @@ gates, offline: a finding fails the pull request, and a waiver is a comment
 on the line that earned it, with its reason, as the `# hadolint ignore=`
 ones are. Every checkout sets `persist-credentials: false` except the one in
 `release.yml`, which says why it keeps them. Then the
-five suites under `hack/test/`, which are the whole test suite, no network:
+six suites under `hack/test/`, which are the whole test suite, no network:
 `registry-readers.sh` for `image-config.sh`, the two release readers and
 `scan-targets.sh`, `release-publish.sh` for the two scripts that run only on
 `release` — `check-pushed-digest.sh` in each build job and `publish-index.sh`
@@ -263,11 +276,15 @@ in the `publish` job — `renovate-extract.sh` for the Renovate check below,
 against a saved extraction, `readme-entrypoint.sh`, which holds the
 README's `-XX:MaxRAMPercentage` to the value `entrypoint.sh` sets — the one
 runtime number the documentation quotes — and `lint-script.sh` for
-`hack/lint.sh`, against a fixture workflow whose steps only echo. The second
+`hack/lint.sh`, against a fixture workflow whose steps only echo, and
+`check-links.sh` for `hack/check-links.sh`, against a `docker` shim that
+records what lychee is handed and replays its exit codes — which files, which
+image, where the report goes, and that a lychee that could not run is neither
+a clean tree nor a broken link. The second
 suite is the only recurring
 coverage of the publish path, which no pull request exercises: a `docker`
 shim records every `imagetools create -t`, and the suite proves that a
-candidate failing a check never reaches one. A change to any of those seven
+candidate failing a check never reaches one. A change to any of those eight
 scripts is not verified until the suites pass; a new manifest shape goes in
 as a fixture under `hack/test/registry/` first. What has no offline test is the push-by-digest
 export itself — it needs buildx and a registry, and rests on the #27 spike

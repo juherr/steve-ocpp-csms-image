@@ -1,0 +1,68 @@
+---
+# Link check of the documentation ALREADY IN THE TREE.
+#
+# Why on a schedule rather than on the pull request: a link works the day it
+# is added and says nothing about the day after — the page it points at moves
+# months later, in someone else's repository. The same shape as a published
+# image drifting into CVE territory, and the same answer: a weekly look at
+# what is there. Not in lint.yml, deliberately: it needs the network, and a
+# pull-request gate that goes red for another site's outage is a gate people
+# learn to scroll past (release-drift.sh makes the same argument).
+#
+# So this is a monitoring signal, not a gate: it never blocks anything, it
+# says which links to fix. What is checked and how is documented in the
+# script it runs — hack/check-links.sh, which is also how you check by hand.
+#
+# GitHub disables scheduled workflows after 60 days without repository activity;
+# on a packaging repository that can happen between two SteVe releases. If the
+# weekly run goes quiet, that is why — re-enable it from the Actions tab.
+
+name: Check documentation links
+
+on:
+  schedule:
+    # Mondays, 06:45 UTC — after the release-drift check, same reasoning
+    # about off-the-hour runner queues.
+    - cron: "45 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: check-links
+  cancel-in-progress: true
+
+env:
+  # renovate: datasource=docker depName=lycheeverse/lychee
+  LYCHEE_IMAGE: "lycheeverse/lychee:0.24.2"
+
+jobs:
+  links:
+    name: lychee over the tracked documentation
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      # Report-only, the way Trivy runs with --exit-code 0: a broken link is a
+      # warning on the run and the report in the step summary, never a red
+      # run. A lychee that could not check — an unreadable input, a bad
+      # option — is a different thing and does fail: that is not a clean
+      # tree, it is no answer at all. The token is for github.com links, which
+      # lychee asks through the API with it rather than anonymously and
+      # rate-limited; contents: read is enough for public repositories.
+      - name: Check the links
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          status=0
+          ./hack/check-links.sh || status=$?
+          case "${status}" in
+            0) ;;
+            1) echo "::warning::Broken links in the documentation — see the step summary" ;;
+            *) exit "${status}" ;;
+          esac
