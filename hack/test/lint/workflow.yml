@@ -1,0 +1,39 @@
+# Fixture for hack/test/lint-script.sh: the shapes lint.yml uses — a quoted
+# env block, a named block step, an unnamed single-line step, a `uses:` step
+# to skip, an unnamed block step in a second job. The commands only echo, so
+# the suite can run them for real. No renovate comments above the env
+# values: hack/renovate-extract-check.sh counts every one in a tracked file
+# as a pin Renovate must extract, and it extracts none from under hack/.
+name: Fixture
+
+on:
+  pull_request:
+
+env:
+  ONE_IMAGE: "example/one:1.0"
+  TWO_IMAGE: "example/two:2.0"
+
+jobs:
+  first:
+    name: First job
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@0000000000000000000000000000000000000000 # v7
+        with:
+          persist-credentials: false
+
+      # A comment between steps, like the real file.
+      - name: block step
+        run: |
+          echo "block one ${ONE_IMAGE}"
+          echo "block two"
+
+      - run: echo "single ${TWO_IMAGE}"
+
+  second:
+    name: Second job
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@0000000000000000000000000000000000000000 # v7
+      - run: |
+          echo "second job"
