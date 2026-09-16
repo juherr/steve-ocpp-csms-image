@@ -1,0 +1,18 @@
+# In-cluster address of SteVe: the management UI and the OCPP WebSocket
+# endpoint share this one port. Expose it through an Ingress or a reverse
+# proxy that terminates TLS — the image serves plain HTTP — and route only the
+# UI hostname to the public interface; see README.md.
+apiVersion: v1
+kind: Service
+metadata:
+  name: steve
+  labels:
+    app.kubernetes.io/name: steve
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: steve
+  ports:
+    - name: http
+      port: 8180
+      targetPort: http

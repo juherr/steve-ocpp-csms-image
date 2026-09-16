@@ -30,6 +30,8 @@ env:
   HADOLINT_IMAGE: "hadolint/hadolint:v2.15.1-alpine"
   # renovate: datasource=docker depName=rhysd/actionlint
   ACTIONLINT_IMAGE: "rhysd/actionlint:1.7.12"
+  # renovate: datasource=docker depName=ghcr.io/yannh/kubeconform
+  KUBECONFORM_IMAGE: "ghcr.io/yannh/kubeconform:v0.8.0-alpine"
   # renovate: datasource=docker depName=renovate/renovate
   RENOVATE_IMAGE: "renovate/renovate:44.93.6"
   # renovate: datasource=docker depName=ghcr.io/zizmorcore/zizmor
@@ -37,7 +39,7 @@ env:
 
 jobs:
   lint:
-    name: Dockerfile, shell & workflows
+    name: Dockerfile, shell, workflows & manifests
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -84,6 +86,15 @@ jobs:
       - name: zizmor (workflows)
         run: |
           docker run --rm -v "${PWD}:/repo" -w /repo "${ZIZMOR_IMAGE}" --offline .
+
+      # The Kubernetes example manifests, against the upstream API schemas —
+      # `-strict` rejects a misspelt field, which the API server would too but
+      # only once someone applies the file. Every YAML under examples/, so a
+      # manifest added next to them is checked on arrival.
+      - name: kubeconform (Kubernetes example manifests)
+        run: |
+          git ls-files 'examples/*.yaml' 'examples/*.yml' \
+            | xargs -r docker run --rm -v "${PWD}:/repo" -w /repo "${KUBECONFORM_IMAGE}" -strict -summary
 
   # The registry readers and the release-only scripts, against fixtures rather
   # than GHCR: the multi-arch shapes the readers must handle are not published

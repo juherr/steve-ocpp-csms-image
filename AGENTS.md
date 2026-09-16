@@ -20,7 +20,7 @@ this repository — if something must change in SteVe, it changes upstream.
 | `entrypoint.sh` | Runs Flyway migrations against the runtime database, then starts the `.war` |
 | `flyway-callbacks/afterConnect.sql` | Forces `default_storage_engine=InnoDB`; replaces `-initSql`, removed in Flyway 13 |
 | `.github/workflows/build-image.yml` | One native build and probe per architecture, merged into an index on `release` — see its `on:` block for the triggers |
-| `.github/workflows/lint.yml` | hadolint / `docker build --check` / shellcheck / actionlint / zizmor, the five suites under `hack/test/`, `renovate-config-validator` and `hack/renovate-extract-check.sh` |
+| `.github/workflows/lint.yml` | hadolint / `docker build --check` / shellcheck / actionlint / zizmor / kubeconform, the five suites under `hack/test/`, `renovate-config-validator` and `hack/renovate-extract-check.sh` |
 | `.github/workflows/scan-published.yml` | Weekly Trivy scan of the tags already on GHCR, one job per image `hack/scan-targets.sh` lists |
 | `.github/workflows/release.yml` | The release, from the Actions tab: preflight, fast-forward `release`, start the build |
 | `.github/workflows/release-drift.yml` | Schedules `hack/release-drift.sh` — see that script for what it compares |
@@ -31,10 +31,11 @@ this repository — if something must change in SteVe, it changes upstream.
 | `hack/scan-targets.sh` | The images `scan-published.yml` scans: one (tag, arch) per supported platform each of the newest tags carries; runnable by hand |
 | `hack/check-pushed-digest.sh` | Is the digest a build job pushed the image it probed; run by each build job on `release` |
 | `hack/publish-index.sh` | Checks the two platform digests and the index they would form, then makes the tag and prints the digest to pin; run by the `publish` job on `release` |
-| `hack/renovate-extract-check.sh` | Is every pin one Renovate extracts — the `# renovate:` comments and the Markdown examples; run by `lint.yml`, runnable by hand |
+| `hack/renovate-extract-check.sh` | Is every pin one Renovate extracts — the `# renovate:` comments, the Markdown examples and the example manifests; run by `lint.yml`, runnable by hand |
 | `hack/lint.sh` | The steps of `lint.yml`, run locally — read out of the workflow, pins and commands, not copied from it |
 | `hack/test/` | Offline tests of the six scripts above that read the registry, against a fixture registry served by a `curl` shim and a `docker` that records instead of acting, of the Renovate check against a saved extraction, of the README's `MaxRAMPercentage` against `entrypoint.sh`, and of `hack/lint.sh` against a fixture workflow |
 | `README.md` | User-facing documentation |
+| `examples/kubernetes/` | Reference `Deployment` + `Service` and their README — an example, not a chart; schema-checked by kubeconform in `lint.yml`, proven by hand in kind |
 | `.github/assets/` | Images referenced by `README.md`; outside the build context |
 | `NOTICE` | License aggregation of the produced image — must stay accurate |
 | `renovate.json` | Dependency pinning automation |
@@ -80,8 +81,8 @@ by tag, GitHub Actions by commit SHA, and `# renovate:` comments drive the
 updates. A comment adjacent to the pin is not enough — check that
 `renovate.json` actually covers the file, otherwise the pin looks maintained and
 silently freezes. `customManagers[1]` deliberately matches every workflow and
-`customManagers[2]` every Markdown file, so a linter, scanner or document added
-later is managed on arrival.
+`customManagers[2]` every Markdown file and every YAML under `examples/`, so a
+linter, scanner, document or manifest added later is managed on arrival.
 
 The SteVe release is pinned in exactly one place in code: `ARG STEVE_REF` in the
 `Dockerfile`. Both the pull-request build and the release read it from there, so
@@ -92,7 +93,15 @@ to ask for. Those examples are managed too and land in the same PR — prose has
 no `# renovate:` comment to hang off, so `customManagers[2]` matches on the
 literal `ghcr.io/juherr/steve:`, `STEVE_REF=` and `manifests/` forms. Keep those
 shapes when editing a README example, or it leaves Renovate's reach; the third
-form matches nothing today and is kept for the next document that uses it.
+form matches nothing today and is kept for the next document that uses it. The
+`image:` line of `examples/kubernetes/deployment.yaml` is the same literal in
+the first form, read by the same manager for the same reason: a manifest is
+meant to be applied by someone who does not yet know which tag to ask for.
+That directory is one `config:recommended` ignores — its `:ignoreModulesAndTests`
+preset lists `**/examples/**` — so `renovate.json` restates `ignorePaths`
+without it. Measured, not read: the manager matched the file and Renovate
+still extracted nothing until the override, which is the case
+`hack/renovate-extract-check.sh` exists to catch.
 
 This file and `CLAUDE.md` read the tag out of the pin instead —
 `$(sed -n 's/^ARG STEVE_REF=//p' Dockerfile)`. Their reader has the repository
@@ -273,10 +282,12 @@ time. Then `hack/renovate-extract-check.sh` runs
 Renovate's own image on the working directory — `--platform=local
 --dry-run=extract` stops after the extraction phase: no datasource queried,
 no branch, no PR, nothing written — and fails when a `# renovate:` comment is
-not inside a `replaceString` of its file, or a Markdown file holds more SteVe
-tag literals in the shapes `renovate.json` declares than Renovate extracted
-from it. `lint.yml` runs it on every pull request, so a README edit that
-leaves a shape is red before it lands; the Renovate image is ~450 MB
+not inside a `replaceString` of its file, or a Markdown file or example
+manifest holds more SteVe tag literals in the shapes `renovate.json` declares
+than Renovate extracted from it. `lint.yml` runs it on every pull request, so a
+README edit that leaves a shape is red before it lands — and so was the
+preset that ignored `examples/`, on the first run against the manifest; the
+Renovate image is ~450 MB
 (measured), the one pull in that workflow that is not seconds. A pin that
 the check does not name is unmanaged, whatever the comment next to it says —
 the Dockerfile `FROM` lines and the action SHAs are the built-in managers'
@@ -289,6 +300,32 @@ to stay out of the rate limit.
 ```bash
 ./hack/renovate-extract-check.sh
 ```
+
+The Kubernetes example is proven in two steps, neither of which is reading the
+YAML. kubeconform, the exact command `lint.yml` runs, says the manifests are
+valid against the API schemas; a throwaway [kind](https://kind.sigs.k8s.io)
+cluster says the pod actually comes up under them — the securityContext, the
+probe budget, `Recreate` on an upgrade. The database image is the build's, read
+from its pin rather than copied here:
+
+```bash
+kind create cluster --name steve-example
+DB_IMAGE=$(sed -n 's/^  DB_IMAGE: "\(.*\)"$/\1/p' .github/workflows/build-image.yml)
+kubectl create deployment mariadb --image="${DB_IMAGE}" -- docker-entrypoint.sh mariadbd --innodb-use-native-aio=0
+kubectl set env deployment/mariadb MARIADB_ROOT_PASSWORD=root MARIADB_DATABASE=stevedb MARIADB_USER=steve MARIADB_PASSWORD=changeme TZ=+00:00
+kubectl expose deployment mariadb --port 3306
+kubectl create secret generic steve --from-literal=DB_PASSWORD=changeme --from-literal=AUTH_USER=admin --from-literal=AUTH_PASSWORD=example-only
+sed 's/value: mariadb.example.internal/value: mariadb/' examples/kubernetes/deployment.yaml | kubectl apply -f - -f examples/kubernetes/service.yaml
+kubectl rollout status deployment/steve --timeout=600s
+kubectl logs deployment/steve | grep -E '^\[entrypoint\]|^Successfully'
+kind delete cluster --name steve-example
+```
+
+An upgrade is the same with the previous published tag applied first and
+`kubectl set image deployment/steve steve=ghcr.io/juherr/steve:<tag>` after;
+the `Migrating schema` lines in the new pod's log are the proof. On Apple
+Silicon a tag from before the multi-arch build runs emulated in kind — ~130 s
+to ready, measured — which is what the `startupProbe` budget is sized for.
 
 Build locally with the block under **Building locally** in `README.md`. It is
 one copy of those commands on purpose: the README claims they are exactly what
