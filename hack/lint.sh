@@ -16,10 +16,10 @@
 # failure ends the run, named. `uses:` steps are the runner's checkout and
 # have no local counterpart.
 #
-# What it needs: Docker for the image-based linters, shellcheck on PATH for
-# the one the runner ships (`brew install shellcheck`), and for the
-# `renovate-extract` job the ~450 MB Renovate image — pass a job id to skip
-# it: `./hack/lint.sh lint hack-tests`.
+# What it needs: Docker, which every step runs through — a pinned linter
+# image, or `docker build --check` itself — and for the `renovate-extract`
+# job the ~450 MB Renovate image; pass a job id to skip it:
+# `./hack/lint.sh lint hack-tests`.
 #
 # Usage:  ./hack/lint.sh [-n] [job-id...]      # -n: print the steps, run nothing
 # Env:    LINT_WORKFLOW=path                    # another workflow file (tests)
