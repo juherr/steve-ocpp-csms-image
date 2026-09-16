@@ -12,6 +12,14 @@
 # one refuses `docker run` on purpose, and hack/test/renovate-extract.sh
 # asserts on the refusal.
 #
+# Then the workflow's side: the step in .github/workflows/check-links.yml
+# that turns the script's exit codes into a verdict — 0 and 1 green, 1 with
+# a warning, anything else red — run as written, through hack/lint.sh, which
+# reads `run:` steps out of whatever workflow LINT_WORKFLOW names, from the
+# root of the repository it is invoked from. Linked into the throwaway
+# repository next to a check-links.sh that only exits, it runs the real
+# step against each code with nothing extracted or copied for the test.
+#
 # Usage:  ./hack/test/check-links.sh
 #         HACK_DIR=/path/to/older/hack ./hack/test/check-links.sh   # red/green
 # Exit:   0 all passed · 1 otherwise
@@ -42,9 +50,10 @@ reset_log() { rm -f "${FAKE_LYCHEE_LOG}"; }
 expect_handed()     { [[ "$(tail -1 "${FAKE_LYCHEE_LOG}")" == *"$1"* ]] || { fail "lychee was not handed '$1': $(tail -1 "${FAKE_LYCHEE_LOG}")"; return 1; }; }
 expect_not_handed() { [[ "$(tail -1 "${FAKE_LYCHEE_LOG}")" != *"$1"* ]] || { fail "lychee was handed '$1'"; return 1; }; }
 
-# The tree under check: two tracked documents, one tracked script that is not
-# one, one document that is not tracked, and the workflow the image pin is
-# read from.
+# The tree under check: three tracked documents, one of them nested — the
+# pathspec must reach a document added later, wherever it lands — one tracked
+# script that is not one, one document that is not tracked, and the workflow
+# the image pin is read from.
 repo="${work}/repo"
 git init -q -b main "${repo}"
 mkdir -p "${repo}/.github/workflows"
@@ -57,6 +66,8 @@ env:
 EOT
 printf '[upstream](https://example.invalid/)\n' >"${repo}/README.md"
 printf 'Source: https://example.invalid/source\n' >"${repo}/NOTICE"
+mkdir -p "${repo}/docs"
+printf '[nested](https://example.invalid/nested)\n' >"${repo}/docs/guide.md"
 printf '#!/bin/sh\n' >"${repo}/script.sh"
 git -C "${repo}" add -A
 git -C "${repo}" -c user.name=test -c user.email=test@example.invalid commit -q -m 'the tree under check'
@@ -68,9 +79,16 @@ reset_log
 run 'a clean tree exits 0 with the report on stdout' "${check}"
 expect_status 0 && expect_out '| Total | 2 |' && pass
 
-run 'lychee is handed the tracked documents, and nothing else' true
-expect_handed ' README.md' && expect_handed ' NOTICE' \
+run 'lychee is handed the tracked documents, nested ones included, and nothing else' true
+expect_handed ' README.md' && expect_handed ' NOTICE' && expect_handed ' docs/guide.md' \
   && expect_not_handed 'script.sh' && expect_not_handed 'UNTRACKED.md' && pass
+
+# Relative links — LICENSE, the README's images — resolve only if the tree
+# is where lychee runs: mounted at /repo, and /repo the working directory.
+# The mount source is the root git reports, which on macOS is the resolved
+# /private path rather than the one mktemp printed.
+run 'the tree is mounted at /repo, which is the working directory' true
+expect_handed " -v $(cd "${repo}" && git rev-parse --show-toplevel):/repo " && expect_handed ' -w /repo ' && pass
 
 run 'lychee is run non-interactively, in markdown, with the GitHub token passed through' true
 expect_handed '--no-progress' && expect_handed '--format markdown' && expect_handed '-e GITHUB_TOKEN' && pass
@@ -118,8 +136,32 @@ expect_status 2 && expect_err 'lychee exited 3' && pass
 
 # --- nothing to check is the wrong directory, not a clean tree -------------
 
-git -C "${repo}" rm -q README.md NOTICE
+git -C "${repo}" rm -q README.md NOTICE docs/guide.md
 run 'a tree with no tracked documentation is refused' "${check}"
 expect_status 2 && expect_err 'nothing to check' && pass
+
+# --- the workflow step: the script's exit code becomes the run's verdict --
+
+# hack/lint.sh runs the steps of the workflow LINT_WORKFLOW names from the
+# root of the repository it sits in — the throwaway one, once linked there —
+# where hack/check-links.sh is a stand-in that only exits with the code a
+# test chooses. The workflow file is the real one.
+workflow="${HACK_DIR}/../.github/workflows/check-links.yml"
+mkdir -p "${repo}/hack"
+ln -s "${HACK_DIR}/lint.sh" "${repo}/hack/lint.sh"
+printf '#!/usr/bin/env bash\nexit "${STANDIN_STATUS}"\n' >"${repo}/hack/check-links.sh"
+chmod +x "${repo}/hack/check-links.sh"
+
+run 'the workflow step: a clean tree is a green run with no warning' \
+  env STANDIN_STATUS=0 LINT_WORKFLOW="${workflow}" ./hack/lint.sh
+expect_status 0 && { [[ "${out}" != *'::warning::'* ]] || fail 'a warning on a clean tree'; } && pass
+
+run 'the workflow step: broken links are a warning on a green run' \
+  env STANDIN_STATUS=1 LINT_WORKFLOW="${workflow}" ./hack/lint.sh
+expect_status 0 && expect_out '::warning::Broken links' && pass
+
+run 'the workflow step: a lychee that could not check is a red run' \
+  env STANDIN_STATUS=2 LINT_WORKFLOW="${workflow}" ./hack/lint.sh
+expect_status 1 && expect_err 'FAIL links / Check the links' && pass
 
 exit "${failed}"
