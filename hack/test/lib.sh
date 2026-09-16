@@ -45,15 +45,25 @@ setup_fixtures() {
 failed=0
 out='' err='' status=0
 
+# The variables lint.yml exports: its `env:` block reaches every job, the one
+# running these suites included, and a script whose fallback reads a pin from
+# the tree under test would see the runner's value instead — green on a laptop
+# where the variable does not exist, red in CI (measured, PR #37). Read from
+# the workflow rather than listed here, so that a pin added there is dropped
+# on arrival. A read loop, not mapfile: macOS ships bash 3.2.
+workflow_env=()
+while IFS= read -r var; do workflow_env+=(-u "${var}"); done \
+  < <(sed -n 's/^  \([A-Z][A-Z0-9_]*\): .*/\1/p' "${HACK_DIR}/../.github/workflows/lint.yml")
+
 # run <name> <command...>: captures stdout, stderr and the exit status. Every
 # command runs from the throwaway repository, where the callers read the
 # Dockerfile and git, and without the GitHub Actions variables — under them
 # the scripts would write to the real step summary and format their messages
-# as annotations.
+# as annotations — nor the workflow's own.
 run() {
   name="$1"; shift
   set +e
-  out=$(cd "${repo}" && env -u GITHUB_ACTIONS -u GITHUB_STEP_SUMMARY "$@" 2>"${work}/stderr"); status=$?
+  out=$(cd "${repo}" && env -u GITHUB_ACTIONS -u GITHUB_STEP_SUMMARY "${workflow_env[@]}" "$@" 2>"${work}/stderr"); status=$?
   set -e
   err=$(cat "${work}/stderr")
 }
