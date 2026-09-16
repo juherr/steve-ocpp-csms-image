@@ -34,8 +34,11 @@ One tag per upstream release: `steve-<X.Y.Z>` names SteVe release
 
 A tag published by the multi-architecture build is an image index holding
 **`linux/amd64`** and **`linux/arm64`**. Both are built natively on their own
-runner — no emulation anywhere — and both go through the same migration
-scenarios in CI before the tag is made. `docker pull` picks the platform of
+runner — no emulation anywhere — and each is migrated from an empty database
+and restarted on it in CI before the tag is made. The third scenario, the
+upgrade from the previous release's schema, runs on a platform that release
+was published for: on the first multi-architecture release that is amd64
+only, from the next one on both. `docker pull` picks the platform of
 the host on its own, so a Raspberry Pi 4/5 on a 64-bit OS or an ARM NAS box
 runs the same tag as a PC, with nothing to add; a 32-bit OS has no platform
 to match. There is no per-architecture tag. Tags published before that build
@@ -304,10 +307,12 @@ either keep that override for good or move its value into `name:` and drop
 it — one of the two, or `name:` pins nothing.
 ### 3. Change the image line
 
-Pick the new tag and its index digest (see *Tags*), and edit the one line:
+Pick the new tag and its index digest (see *Tags*), and edit the one line —
+the old digest is whatever was pinned, an index's or, for a release from
+before the multi-architecture build, a single manifest's:
 
 ```diff
--    image: ghcr.io/juherr/steve:steve-X.Y.Z@sha256:<old index digest>
+-    image: ghcr.io/juherr/steve:steve-X.Y.Z@sha256:<old digest>
 +    image: ghcr.io/juherr/steve:steve-3.14.1@sha256:<index digest>
 ```
 
