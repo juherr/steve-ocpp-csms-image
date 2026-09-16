@@ -32,12 +32,15 @@ cannot drift apart.
 One tag per upstream release: `steve-<X.Y.Z>` names SteVe release
 `steve-X.Y.Z`. There is deliberately no `latest` and no per-commit tag.
 
-Each tag is an image index holding **`linux/amd64`** and **`linux/arm64`**.
-Both are built natively on their own runner — no emulation anywhere — and
-both go through the same migration scenarios in CI before the tag is made.
-`docker pull` picks the platform of the host on its own, so a Raspberry Pi 4/5
-or an ARM NAS box runs the same tag as a PC, with nothing to add. There is no
-per-architecture tag.
+A tag published by the multi-architecture build is an image index holding
+**`linux/amd64`** and **`linux/arm64`**. Both are built natively on their own
+runner — no emulation anywhere — and both go through the same migration
+scenarios in CI before the tag is made. `docker pull` picks the platform of
+the host on its own, so a Raspberry Pi 4/5 on a 64-bit OS or an ARM NAS box
+runs the same tag as a PC, with nothing to add; a 32-bit OS has no platform
+to match. There is no per-architecture tag. Tags published before that build
+are `linux/amd64` alone, a single manifest rather than an index, and
+`imagetools inspect` below tells the two shapes apart.
 
 The image currently runs on **Eclipse Temurin 25 (JRE)** — a build detail, not
 part of the tag. A JRE update republishes the same tag with a new digest.
@@ -47,7 +50,7 @@ so the tag alongside it is documentation: a moving tag cannot change what you
 run, and it keeps version-tracking tools pointed at something still being
 republished.
 
-A tag has three digests, and only one of them is the one to pin: the
+An index tag has three digests, and only one of them is the one to pin: the
 **index's**, which `imagetools inspect` prints first and which the release
 prints as "Digest to pin". The two under `Manifests:` are the platform images
 the index points at; pinning one of those pins one architecture, and a host
