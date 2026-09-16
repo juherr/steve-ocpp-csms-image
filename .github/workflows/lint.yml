@@ -1,7 +1,9 @@
 ---
-# Static checks plus the one offline test — no Docker build, no registry, no
+# Static checks plus the offline tests — no Docker build, no registry, no
 # database. Seconds, not minutes, so this runs on every pull request whatever
-# it touches (unlike the image build, which is path-filtered).
+# it touches (unlike the image build, which is path-filtered). The one pull
+# that is not seconds is Renovate's own image below, ~450 MB (measured), the
+# price of the pins being checked by the tool that moves them.
 #
 # The linters run from their own pinned images instead of third-party actions:
 # one less thing to pin by SHA, and the exact command below is runnable locally.
@@ -26,6 +28,8 @@ env:
   HADOLINT_IMAGE: "hadolint/hadolint:v2.15.1-alpine"
   # renovate: datasource=docker depName=rhysd/actionlint
   ACTIONLINT_IMAGE: "rhysd/actionlint:1.7.12"
+  # renovate: datasource=docker depName=renovate/renovate
+  RENOVATE_IMAGE: "renovate/renovate:44.93.6"
 
 jobs:
   lint:
@@ -64,3 +68,16 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - run: ./hack/test/registry-readers.sh
       - run: ./hack/test/release-publish.sh
+      - run: ./hack/test/renovate-extract.sh
+
+  # Every pin is one Renovate extracts — the `# renovate:` comments and the
+  # SteVe tag examples in the Markdown files, which have no comment to hang
+  # off and would otherwise freeze silently the day a README edit leaves
+  # their shape. Extraction only: no datasource, no branch, nothing written.
+  renovate-extract:
+    name: Pins are extracted by Renovate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - run: ./hack/renovate-extract-check.sh

@@ -13,11 +13,12 @@ descriptions — in English.
 
 ## Verification has a real cost here
 
-The unit tests are the two suites under `hack/test/`, and they cover the
-scripts that read the registry alone, offline, against fixtures — including
-the two that run only on `release`. For the image itself the
-meaningful checks are a full build, which clones SteVe and runs Maven against a
-live MariaDB (~2 min on CI, once per architecture, longer locally), and
+The unit tests are the three suites under `hack/test/`, and they cover the
+scripts that read the registry — including the two that run only on
+`release` — and the Renovate check, alone, offline, against fixtures. For
+the image itself the meaningful checks are a full build, which clones SteVe
+and runs Maven against a live MariaDB (~2 min on CI, once per architecture,
+longer locally), and
 `hack/migration-test.sh` on the result, which boots the image against an empty
 MariaDB, boots it again on the schema that left behind, and — given a previous
 release as second argument — on a schema that release wrote. So:
