@@ -61,6 +61,8 @@ on:
       - "entrypoint.sh"
       - "flyway-callbacks/**"
       - "hack/migration-test.sh"
+      - "hack/k8s-example-test.sh"
+      - "examples/kubernetes/**"
       - "hack/image-config.sh"
       - "hack/check-pushed-digest.sh"
       - "hack/publish-index.sh"
@@ -306,6 +308,24 @@ jobs:
           set -euo pipefail
           ./hack/migration-test.sh "${IMAGE}:${STEVE_REF}" ${PREVIOUS_IMAGE:+"${PREVIOUS_IMAGE}"}
 
+      # The Kubernetes example, against this very image: kubeconform in
+      # lint.yml proves the manifests are valid, this proves a pod comes up
+      # under them — read-only root filesystem, dropped capabilities, probes,
+      # Service — with the database started in-cluster, empty. The image is
+      # loaded into a kind cluster rather than pulled: for a tag not yet
+      # published it is the only one there is, and it is the one that would
+      # ship. On the amd64 job alone: the manifest is the same on both
+      # architectures and the image has already been probed on each. kind and
+      # kubectl ship with the runner image, unpinned like its Engine and
+      # buildx — test tools, not components of the image.
+      - name: Bring the Kubernetes example up on this image
+        if: matrix.arch == 'amd64'
+        env:
+          STEVE_REF: ${{ steps.ref.outputs.steve_ref }}
+        run: |
+          set -euo pipefail
+          ./hack/k8s-example-test.sh "${IMAGE}:${STEVE_REF}"
+
       - name: Login to GHCR
         if: github.ref_name == 'release'
         env:
@@ -360,6 +380,7 @@ jobs:
           docker rm -f steve-build-db || true
           docker ps -aq --filter 'label=steve-it' | xargs -r docker rm -f || true
           docker network ls -q --filter 'label=steve-it' | xargs -r docker network rm || true
+          kind get clusters 2>/dev/null | grep '^steve-k8s-' | xargs -r -n1 kind delete cluster --name || true
           docker buildx rm "${BUILDER}" || true
           docker logout ghcr.io || true
 

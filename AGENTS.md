@@ -27,6 +27,7 @@ this repository — if something must change in SteVe, it changes upstream.
 | `hack/release-drift.sh` | Published image vs the `release` branch; runnable by hand |
 | `hack/release-preflight.sh` | Would releasing HEAD publish anything, or only move a digest; runnable by hand |
 | `hack/migration-test.sh` | Fresh-database migration, restart and upgrade scenarios against the built image; what CI runs after the build, runnable by hand |
+| `hack/k8s-example-test.sh` | Applies `examples/kubernetes/` to a throwaway kind cluster and checks a pod comes up under what it declares; run by the amd64 build job on the image it built, runnable by hand against the published tag |
 | `hack/image-config.sh` | Image config of a published tag, single manifest or index; what `release-drift.sh`, `release-preflight.sh`, the three scripts below, the build workflow and the `CLAUDE.md` recipe read through |
 | `hack/scan-targets.sh` | The images `scan-published.yml` scans: one (tag, arch) per supported platform each of the newest tags carries; runnable by hand |
 | `hack/check-pushed-digest.sh` | Is the digest a build job pushed the image it probed; run by each build job on `release` |
@@ -35,7 +36,7 @@ this repository — if something must change in SteVe, it changes upstream.
 | `hack/lint.sh` | The steps of `lint.yml`, run locally — read out of the workflow, pins and commands, not copied from it |
 | `hack/test/` | Offline tests of the six scripts above that read the registry, against a fixture registry served by a `curl` shim and a `docker` that records instead of acting, of the Renovate check against a saved extraction, of the README's `MaxRAMPercentage` against `entrypoint.sh`, and of `hack/lint.sh` against a fixture workflow |
 | `README.md` | User-facing documentation |
-| `examples/kubernetes/` | Reference `Deployment` + `Service` and their README — an example, not a chart; schema-checked by kubeconform in `lint.yml`, proven by hand in kind |
+| `examples/kubernetes/` | Reference `Deployment` + `Service` and their README — an example, not a chart; schema-checked by kubeconform in `lint.yml`, brought up in kind by `hack/k8s-example-test.sh` on every build |
 | `.github/assets/` | Images referenced by `README.md`; outside the build context |
 | `NOTICE` | License aggregation of the produced image — must stay accurate |
 | `renovate.json` | Dependency pinning automation |
@@ -303,29 +304,31 @@ to stay out of the rate limit.
 
 The Kubernetes example is proven in two steps, neither of which is reading the
 YAML. kubeconform, the exact command `lint.yml` runs, says the manifests are
-valid against the API schemas; a throwaway [kind](https://kind.sigs.k8s.io)
-cluster says the pod actually comes up under them — the securityContext, the
-probe budget, `Recreate` on an upgrade. The database image is the build's, read
-from its pin rather than copied here:
+valid against the API schemas; `hack/k8s-example-test.sh` says a pod actually
+comes up under them — as `10001:10001`, root filesystem read-only and `/tmp`
+writable, the probes finding the sign-in page, the Service reaching the pod —
+in a throwaway [kind](https://kind.sigs.k8s.io) cluster with an empty MariaDB
+started in it, so the first-boot migration runs too. The amd64 build job runs
+it on the image it has just built, loaded into the cluster rather than pulled:
+for a tag not yet published that image is the only one there is. By hand,
+without an argument, it applies the manifest as published and the cluster
+pulls the tag it names; the cluster gets its own kubeconfig, and your current
+context is neither read nor changed:
 
 ```bash
-kind create cluster --name steve-example
-DB_IMAGE=$(sed -n 's/^  DB_IMAGE: "\(.*\)"$/\1/p' .github/workflows/build-image.yml)
-kubectl create deployment mariadb --image="${DB_IMAGE}" -- docker-entrypoint.sh mariadbd --innodb-use-native-aio=0
-kubectl set env deployment/mariadb MARIADB_ROOT_PASSWORD=root MARIADB_DATABASE=stevedb MARIADB_USER=steve MARIADB_PASSWORD=changeme TZ=+00:00
-kubectl expose deployment mariadb --port 3306
-kubectl create secret generic steve --from-literal=DB_PASSWORD=changeme --from-literal=AUTH_USER=admin --from-literal=AUTH_PASSWORD=example-only
-sed 's/value: mariadb.example.internal/value: mariadb/' examples/kubernetes/deployment.yaml | kubectl apply -f - -f examples/kubernetes/service.yaml
-kubectl rollout status deployment/steve --timeout=600s
-kubectl logs deployment/steve | grep -E '^\[entrypoint\]|^Successfully'
-kind delete cluster --name steve-example
+./hack/k8s-example-test.sh                 # the published tag the manifest names
+./hack/k8s-example-test.sh steve:local     # an image from the daemon, as CI does
 ```
 
-An upgrade is the same with the previous published tag applied first and
-`kubectl set image deployment/steve steve=ghcr.io/juherr/steve:<tag>` after;
-the `Migrating schema` lines in the new pod's log are the proof. On Apple
-Silicon a tag from before the multi-arch build runs emulated in kind — ~130 s
-to ready, measured — which is what the `startupProbe` budget is sized for.
+A change under `examples/kubernetes/` or to the script therefore triggers the
+image build on a pull request — the test needs an image, and the one the pull
+request builds is the one it should run against. The upgrade scenario is not in
+the script: `Recreate` was measured by hand — the previous published tag
+applied first, `kubectl set image deployment/steve steve=ghcr.io/juherr/steve:<tag>`
+after, the `Migrating schema` lines in the new pod's log — and stays a hand
+check until it proves necessary in CI. On Apple Silicon a tag from before the
+multi-arch build runs emulated in kind — ~130 s to ready, measured — which is
+what the `startupProbe` budget is sized for.
 
 Build locally with the block under **Building locally** in `README.md`. It is
 one copy of those commands on purpose: the README claims they are exactly what

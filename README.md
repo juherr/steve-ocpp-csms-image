@@ -164,7 +164,7 @@ reference `Deployment` and `Service` — one replica, non-root, read-only root
 filesystem, probes sized for the startup migration, credentials from a
 `Secret` — with the reasoning next to each choice. It is an example that
 leaves the cluster-specific parts (namespace, Ingress, database) to you, not a
-chart.
+chart; CI brings it up in a kind cluster on every image it builds.
 
 ### Configuration is injected at runtime
 
