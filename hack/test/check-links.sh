@@ -48,9 +48,11 @@ expect_not_handed() { [[ "$(tail -1 "${FAKE_LYCHEE_LOG}")" != *"$1"* ]] || { fai
 repo="${work}/repo"
 git init -q -b main "${repo}"
 mkdir -p "${repo}/.github/workflows"
+# The pin line only, no `# renovate:` marker above it: the Renovate check
+# reads every tracked file, this one included, and would count the marker
+# as a pin of a shell script no manager reads (measured, run 35125983477).
 cat >"${repo}/.github/workflows/check-links.yml" <<'EOT'
 env:
-  # renovate: datasource=docker depName=lycheeverse/lychee
   LYCHEE_IMAGE: "lycheeverse/lychee:0.0.1"
 EOT
 printf '[upstream](https://example.invalid/)\n' >"${repo}/README.md"
