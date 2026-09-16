@@ -32,6 +32,13 @@ cannot drift apart.
 One tag per upstream release: `steve-<X.Y.Z>` names SteVe release
 `steve-X.Y.Z`. There is deliberately no `latest` and no per-commit tag.
 
+Each tag is an image index holding **`linux/amd64`** and **`linux/arm64`**.
+Both are built natively on their own runner — no emulation anywhere — and
+both go through the same migration scenarios in CI before the tag is made.
+`docker pull` picks the platform of the host on its own, so a Raspberry Pi 4/5
+or an ARM NAS box runs the same tag as a PC, with nothing to add. There is no
+per-architecture tag.
+
 The image currently runs on **Eclipse Temurin 25 (JRE)** — a build detail, not
 part of the tag. A JRE update republishes the same tag with a new digest.
 
@@ -40,12 +47,34 @@ so the tag alongside it is documentation: a moving tag cannot change what you
 run, and it keeps version-tracking tools pointed at something still being
 republished.
 
+A tag has three digests, and only one of them is the one to pin: the
+**index's**, which `imagetools inspect` prints first and which the release
+prints as "Digest to pin". The two under `Manifests:` are the platform images
+the index points at; pinning one of those pins one architecture, and a host
+of the other one still pulls it — with a platform-mismatch warning — and then
+runs it only if it can emulate it.
+
 ```bash
 docker buildx imagetools inspect ghcr.io/juherr/steve:steve-3.14.1
 ```
 
+```
+Name:      ghcr.io/juherr/steve:steve-3.14.1
+MediaType: application/vnd.oci.image.index.v1+json
+Digest:    sha256:<index digest>
+
+Manifests:
+  Name:      ghcr.io/juherr/steve:steve-3.14.1@sha256:<amd64 digest>
+  MediaType: application/vnd.oci.image.manifest.v1+json
+  Platform:  linux/amd64
+
+  Name:      ghcr.io/juherr/steve:steve-3.14.1@sha256:<arm64 digest>
+  MediaType: application/vnd.oci.image.manifest.v1+json
+  Platform:  linux/arm64
+```
+
 ```yaml
-image: ghcr.io/juherr/steve:steve-3.14.1@sha256:<digest>
+image: ghcr.io/juherr/steve:steve-3.14.1@sha256:<index digest>
 ```
 
 The exact JRE of an image you already hold is readable from it:
@@ -59,6 +88,9 @@ docker run --rm --entrypoint java ghcr.io/juherr/steve:steve-3.14.1 -version
 ```bash
 docker pull ghcr.io/juherr/steve:steve-3.14.1
 ```
+
+This fetches the platform of the host; `--platform linux/arm64` (or `amd64`)
+fetches the other one on purpose, to inspect it for instance.
 
 Minimal Compose setup:
 
@@ -269,11 +301,11 @@ either keep that override for good or move its value into `name:` and drop
 it — one of the two, or `name:` pins nothing.
 ### 3. Change the image line
 
-Pick the new tag and its digest (see *Tags*), and edit the one line:
+Pick the new tag and its index digest (see *Tags*), and edit the one line:
 
 ```diff
--    image: ghcr.io/juherr/steve:steve-X.Y.Z@sha256:<old digest>
-+    image: ghcr.io/juherr/steve:steve-3.14.1@sha256:<digest>
+-    image: ghcr.io/juherr/steve:steve-X.Y.Z@sha256:<old index digest>
++    image: ghcr.io/juherr/steve:steve-3.14.1@sha256:<index digest>
 ```
 
 ### 4. Pull and start
@@ -407,6 +439,12 @@ on the host network, its `RUN` steps reach the database on `127.0.0.1` with no
 `--network` flag at all. Using the same builder locally is what keeps the claim
 above true — a CI failure reproduces here, builder included.
 
+What `--load` puts in the daemon is the image for the machine's own
+architecture and nothing else — arm64 on Apple Silicon, amd64 on a PC — so
+`steve:local` is one of the two published platforms, not the index. It always
+was the machine's architecture; what changed with the multi-arch tag is that
+it now matches something CI ships. The commands are the same either way.
+
 ## Releasing
 
 Publishing is the `release` branch moving to `main`. From the **Actions** tab,
@@ -418,10 +456,11 @@ git push origin main:release
 ```
 
 Either way the image builds on GitHub-hosted runners, one per architecture, and
-is pushed to GHCR, with the resulting digest printed at the end, ready to pin.
-The version built is whatever `ARG STEVE_REF` says in the `Dockerfile` on that
-commit — the single place the release is pinned in code, which is why the
-workflow asks for no version.
+is pushed to GHCR; the index digest — the one to pin — is printed at the end,
+with the two platform digests beside it in the run's summary. The version
+built is whatever `ARG STEVE_REF` says in the `Dockerfile` on that commit —
+the single place the release is pinned in code, which is why the workflow asks
+for no version.
 
 The workflow adds one check the bare push cannot make: it refuses when the tag
 is already published *and* the packaging has not changed since, because that
