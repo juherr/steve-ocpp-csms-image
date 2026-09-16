@@ -236,6 +236,66 @@ authentication proxy. If you expose the UI publicly behind a reverse proxy,
 route only the UI hostname and keep the OCPP endpoint off the public interface —
 for example by publishing it on a VPN address only.
 
+## Deploying on a NAS or a small board
+
+What makes upstream's Compose setup heavy on a NAS or a single-board computer
+is the `mvnw clean package` in its `CMD`: Maven, the dependency downloads it
+makes — through whatever proxy the box sits behind — and a JDK to run them, on
+every start (upstream
+[#1919](https://github.com/steve-community/steve/issues/1919),
+[#777](https://github.com/steve-community/steve/issues/777),
+[#1094](https://github.com/steve-community/steve/issues/1094),
+[#909](https://github.com/steve-community/steve/issues/909)). None of that
+happens here. The `.war`, the JRE and the Flyway scripts are in the image;
+**nothing is compiled or downloaded when the container starts**, and the only
+thing the entrypoint reaches is the database — see *Why this image exists*.
+Synology Container Manager, QNAP Container Station and Portainer all take the
+Compose file under *Usage* as it is; there are no vendor-specific steps in
+this document.
+
+**Platform.** Which architectures a tag carries, and how to read that off the
+registry, is under *Tags*. The host needs a 64-bit OS.
+
+**Restart policy.** `restart: unless-stopped`, as in the Compose file above:
+the stack comes back after a host reboot, and a container stopped on purpose
+with `docker compose stop` stays down until started again. (Docker's
+documented semantics for the policy; not re-measured here.)
+
+**What to persist and back up.** The application container is disposable:
+running, it writes nothing outside `/tmp` — a jar cache, the JVM's perf data and Jetty's compiled
+JSPs, per `docker diff` on `steve-3.14.1`. All state is the MariaDB data
+directory, bind-mounted from `./data/mariadb`, so put that path on the volume
+the NAS backs up. A filesystem snapshot of a running data directory is not a
+consistent backup; the dump under *Upgrading*, step 1, is — schedule it (the
+NAS task scheduler, or `cron`) and keep the dumps somewhere other than the
+disk holding `./data/mariadb`.
+
+**Memory.** The entrypoint starts the JVM with `-XX:MaxRAMPercentage=85`, so
+the heap is sized from the container's memory limit — and, with no limit,
+from the whole machine: 6.5 GiB of heap allowed on a 7.65 GiB host
+(measured), shared with MariaDB and everything else the NAS runs. Set a limit
+on the `steve` service; MariaDB sizes itself independently and is left alone
+here.
+
+```yaml
+  steve:
+    mem_limit: 1g   # the heap becomes 85 % of this; see below
+```
+
+Measured on `steve-3.14.1`, idle, no charge point connected — the amd64
+image, emulated on Apple Silicon: the heap sizing is the same on any host,
+the resident figures are indicative. Under `1g` the container settles at
+about 525 MiB. Under `512m` it still migrates an empty database and becomes
+healthy, but sits at about 490 MiB of its 512 with nothing to spare.
+`docker stats` reads your own. No CPU figure is given: none was measured.
+
+**TLS.** Terminate it at a reverse proxy rather than inside SteVe: publish
+`8180` on `127.0.0.1` only (see *Networking*) and let the proxy hold the
+certificate. The proxy must pass WebSocket upgrades through, or charge points
+cannot connect; they then use `wss://`. And route only the UI hostname
+through it — the OCPP endpoint stays off the public interface, as in the
+*Security note*.
+
 ## Upgrading
 
 The image is the only thing that moves. The database keeps its data, the new
