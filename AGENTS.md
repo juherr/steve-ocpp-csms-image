@@ -20,21 +20,23 @@ this repository — if something must change in SteVe, it changes upstream.
 | `entrypoint.sh` | Runs Flyway migrations against the runtime database, then starts the `.war` |
 | `flyway-callbacks/afterConnect.sql` | Forces `default_storage_engine=InnoDB`; replaces `-initSql`, removed in Flyway 13 |
 | `.github/workflows/build-image.yml` | One native build and probe per architecture, merged into an index on `release` — see its `on:` block for the triggers |
-| `.github/workflows/lint.yml` | hadolint / `docker build --check` / shellcheck / actionlint / zizmor, the five suites under `hack/test/`, `renovate-config-validator` and `hack/renovate-extract-check.sh` |
+| `.github/workflows/lint.yml` | hadolint / `docker build --check` / shellcheck / actionlint / zizmor / kubeconform, the five suites under `hack/test/`, `renovate-config-validator` and `hack/renovate-extract-check.sh` |
 | `.github/workflows/scan-published.yml` | Weekly Trivy scan of the tags already on GHCR, one job per image `hack/scan-targets.sh` lists |
 | `.github/workflows/release.yml` | The release, from the Actions tab: preflight, fast-forward `release`, start the build |
 | `.github/workflows/release-drift.yml` | Schedules `hack/release-drift.sh` — see that script for what it compares |
 | `hack/release-drift.sh` | Published image vs the `release` branch; runnable by hand |
 | `hack/release-preflight.sh` | Would releasing HEAD publish anything, or only move a digest; runnable by hand |
 | `hack/migration-test.sh` | Fresh-database migration, restart and upgrade scenarios against the built image; what CI runs after the build, runnable by hand |
+| `hack/k8s-example-test.sh` | Applies `examples/kubernetes/` to a throwaway kind cluster, reads back what the Deployment declares (replicas, `Recreate`, security context, probe paths) and checks a pod comes up under it with the Secret reaching it; run by the amd64 build job on the image it built, runnable by hand against the published tag |
 | `hack/image-config.sh` | Image config of a published tag, single manifest or index; what `release-drift.sh`, `release-preflight.sh`, the three scripts below, the build workflow and the `CLAUDE.md` recipe read through |
 | `hack/scan-targets.sh` | The images `scan-published.yml` scans: one (tag, arch) per supported platform each of the newest tags carries; runnable by hand |
 | `hack/check-pushed-digest.sh` | Is the digest a build job pushed the image it probed; run by each build job on `release` |
 | `hack/publish-index.sh` | Checks the two platform digests and the index they would form, then makes the tag and prints the digest to pin; run by the `publish` job on `release` |
-| `hack/renovate-extract-check.sh` | Is every pin one Renovate extracts — the `# renovate:` comments and the Markdown examples; run by `lint.yml`, runnable by hand |
+| `hack/renovate-extract-check.sh` | Is every pin one Renovate extracts — the `# renovate:` comments, the Markdown examples and the example manifests; run by `lint.yml`, runnable by hand |
 | `hack/lint.sh` | The steps of `lint.yml`, run locally — read out of the workflow, pins and commands, not copied from it |
 | `hack/test/` | Offline tests of the six scripts above that read the registry, against a fixture registry served by a `curl` shim and a `docker` that records instead of acting, of the Renovate check against a saved extraction, of the README's `MaxRAMPercentage` against `entrypoint.sh`, and of `hack/lint.sh` against a fixture workflow |
 | `README.md` | User-facing documentation |
+| `examples/kubernetes/` | Reference `Deployment` + `Service` and their README — an example, not a chart; schema-checked by kubeconform in `lint.yml`, brought up in kind by `hack/k8s-example-test.sh` on every build |
 | `.github/assets/` | Images referenced by `README.md`; outside the build context |
 | `NOTICE` | License aggregation of the produced image — must stay accurate |
 | `renovate.json` | Dependency pinning automation |
@@ -80,8 +82,8 @@ by tag, GitHub Actions by commit SHA, and `# renovate:` comments drive the
 updates. A comment adjacent to the pin is not enough — check that
 `renovate.json` actually covers the file, otherwise the pin looks maintained and
 silently freezes. `customManagers[1]` deliberately matches every workflow and
-`customManagers[2]` every Markdown file, so a linter, scanner or document added
-later is managed on arrival.
+`customManagers[2]` every Markdown file and every YAML under `examples/`, so a
+linter, scanner, document or manifest added later is managed on arrival.
 
 The SteVe release is pinned in exactly one place in code: `ARG STEVE_REF` in the
 `Dockerfile`. Both the pull-request build and the release read it from there, so
@@ -92,7 +94,15 @@ to ask for. Those examples are managed too and land in the same PR — prose has
 no `# renovate:` comment to hang off, so `customManagers[2]` matches on the
 literal `ghcr.io/juherr/steve:`, `STEVE_REF=` and `manifests/` forms. Keep those
 shapes when editing a README example, or it leaves Renovate's reach; the third
-form matches nothing today and is kept for the next document that uses it.
+form matches nothing today and is kept for the next document that uses it. The
+`image:` line of `examples/kubernetes/deployment.yaml` is the same literal in
+the first form, read by the same manager for the same reason: a manifest is
+meant to be applied by someone who does not yet know which tag to ask for.
+That directory is one `config:recommended` ignores — its `:ignoreModulesAndTests`
+preset lists `**/examples/**` — so `renovate.json` restates `ignorePaths`
+without it. Measured, not read: the manager matched the file and Renovate
+still extracted nothing until the override, which is the case
+`hack/renovate-extract-check.sh` exists to catch.
 
 This file and `CLAUDE.md` read the tag out of the pin instead —
 `$(sed -n 's/^ARG STEVE_REF=//p' Dockerfile)`. Their reader has the repository
@@ -273,10 +283,12 @@ time. Then `hack/renovate-extract-check.sh` runs
 Renovate's own image on the working directory — `--platform=local
 --dry-run=extract` stops after the extraction phase: no datasource queried,
 no branch, no PR, nothing written — and fails when a `# renovate:` comment is
-not inside a `replaceString` of its file, or a Markdown file holds more SteVe
-tag literals in the shapes `renovate.json` declares than Renovate extracted
-from it. `lint.yml` runs it on every pull request, so a README edit that
-leaves a shape is red before it lands; the Renovate image is ~450 MB
+not inside a `replaceString` of its file, or a Markdown file or example
+manifest holds more SteVe tag literals in the shapes `renovate.json` declares
+than Renovate extracted from it. `lint.yml` runs it on every pull request, so a
+README edit that leaves a shape is red before it lands — and so was the
+preset that ignored `examples/`, on the first run against the manifest; the
+Renovate image is ~450 MB
 (measured), the one pull in that workflow that is not seconds. A pin that
 the check does not name is unmanaged, whatever the comment next to it says —
 the Dockerfile `FROM` lines and the action SHAs are the built-in managers'
@@ -289,6 +301,42 @@ to stay out of the rate limit.
 ```bash
 ./hack/renovate-extract-check.sh
 ```
+
+The Kubernetes example is proven in two steps, neither of which is reading the
+YAML. kubeconform, the exact command `lint.yml` runs, says the manifests are
+valid against the API schemas; `hack/k8s-example-test.sh` says a pod actually
+comes up under them — as `10001:10001`, root filesystem read-only and `/tmp`
+writable, the Service reaching the pod, the Secret's three keys in the
+container's environment with a database password that is *not* the compiled-in
+default, so a Secret that stopped reaching the container fails Flyway rather
+than falling through to `changeme` — in a throwaway
+[kind](https://kind.sigs.k8s.io) cluster with an empty MariaDB started in it,
+so the first-boot migration runs too. What a fresh deployment cannot exercise
+is read back from the applied Deployment and compared with the example's
+promises: one replica and `Recreate`, the security context, and the three
+probe paths — any other path under `/steve/manager/` answers a 302 to the
+sign-in page, which a Kubernetes HTTP probe counts as success (measured), so a
+misspelt probe would come up green and prove nothing. The amd64 build job runs
+it on the image it has just built, loaded into the cluster rather than pulled:
+for a tag not yet published that image is the only one there is. By hand,
+without an argument, it applies the manifest as published and the cluster
+pulls the tag it names; the cluster gets its own kubeconfig, and your current
+context is neither read nor changed:
+
+```bash
+./hack/k8s-example-test.sh                 # the published tag the manifest names
+./hack/k8s-example-test.sh steve:local     # an image from the daemon, as CI does
+```
+
+A change under `examples/kubernetes/` or to the script therefore triggers the
+image build on a pull request — the test needs an image, and the one the pull
+request builds is the one it should run against. The upgrade scenario is not in
+the script: `Recreate` was measured by hand — the previous published tag
+applied first, `kubectl set image deployment/steve steve=ghcr.io/juherr/steve:<tag>`
+after, the `Migrating schema` lines in the new pod's log — and stays a hand
+check until it proves necessary in CI. On Apple Silicon a tag from before the
+multi-arch build runs emulated in kind — ~130 s to ready, measured — which is
+what the `startupProbe` budget is sized for.
 
 Build locally with the block under **Building locally** in `README.md`. It is
 one copy of those commands on purpose: the README claims they are exactly what

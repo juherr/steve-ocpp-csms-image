@@ -1,0 +1,120 @@
+# Reference Deployment of ghcr.io/juherr/steve — an example, not a manifest for
+# every cluster. What it fixes is what the image needs; what it leaves out
+# (namespace, Ingress, the database) is what only your cluster can decide.
+# See README.md next to this file.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: steve
+  labels:
+    app.kubernetes.io/name: steve
+spec:
+  # One replica. The entrypoint replays the Flyway migrations at startup, and
+  # two pods starting against the same empty schema would both set out to
+  # run them; nothing in SteVe shares OCPP sessions between instances either.
+  # Scale the database and the reverse proxy; not this.
+  replicas: 1
+  # Recreate, not the RollingUpdate default: on an upgrade the new pod migrates
+  # the schema while the old pod, under RollingUpdate, would still be serving
+  # on it. Stopping the old one first is the same order as the README's
+  # `docker compose up -d steve`. The cost is the migration's worth of
+  # downtime, which an upgrade of a single instance has anyway.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: steve
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: steve
+    spec:
+      # The image runs as 10001:10001 (`USER` in the Dockerfile); saying so
+      # here lets the kubelet refuse an image that does not.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: steve
+          # Pin by digest in production — the index digest, see "Tags" in the
+          # repository README: this tag is republished on a JRE update.
+          image: ghcr.io/juherr/steve:steve-3.14.1
+          # Because the tag moves: for a tag that is not `latest` Kubernetes
+          # defaults to IfNotPresent, and a pod recreated on a node that
+          # cached the tag would keep the old JRE. With a digest pinned this
+          # costs a manifest check per start and changes nothing.
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 8180
+          env:
+            # The one value to change: the host of your MariaDB — a managed
+            # database, an operator's Service, a StatefulSet you run. The
+            # database is not part of this example. It must be in UTC and
+            # hold an empty `stevedb` the `steve` user owns on first start.
+            - name: DB_IP
+              value: mariadb.example.internal
+            # Reject any charge point not pre-registered in the database:
+            # already the upstream default, pinned against a default change.
+            - name: AUTO_REGISTER_UNKNOWN_STATIONS
+              value: "false"
+          # DB_PASSWORD, AUTH_USER, AUTH_PASSWORD — created out of band, see
+          # README.md. Every key of the Secret becomes an environment variable,
+          # so the Secret carries only SteVe settings.
+          envFrom:
+            - secretRef:
+                name: steve
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            readOnlyRootFilesystem: true
+          volumeMounts:
+            # Jetty unpacks the .war and Java writes its temp files under
+            # /tmp; with the root filesystem read-only this is the one
+            # writable path the image needs (measured: nothing else is
+            # written).
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            requests:
+              cpu: 250m
+              memory: 1Gi
+            limits:
+              # The entrypoint starts Java with -XX:MaxRAMPercentage=85, so
+              # the memory limit is what sizes the heap; without one the JVM
+              # sizes itself on the node's memory.
+              memory: 1Gi
+          # The sign-in page, the same URL as the README's Compose healthcheck:
+          # it answers once Jetty and the Spring context are up. It does not
+          # touch the database, on purpose for liveness — an outage of the
+          # database should not restart SteVe — and for lack of anything
+          # better for readiness: upstream exposes no health endpoint.
+          startupProbe:
+            httpGet:
+              path: /steve/manager/signin
+              port: http
+            # First start replays every migration against the empty database
+            # before SteVe even starts; 300 s covers it with room, and
+            # liveness does not begin until this succeeds.
+            periodSeconds: 10
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /steve/manager/signin
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /steve/manager/signin
+              port: http
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+      volumes:
+        - name: tmp
+          emptyDir: {}

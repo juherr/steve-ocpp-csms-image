@@ -44,6 +44,14 @@ release as second argument — on a schema that release wrote. So:
 - For a change to `hack/migration-test.sh`, running it is the proof — against a
   published tag when the change does not need a fresh build, which skips the
   Maven cost entirely.
+- For a change under `examples/kubernetes/`, the proof is kubeconform (the
+  `lint.yml` command) plus `hack/k8s-example-test.sh` — a throwaway kind
+  cluster, what the amd64 build job runs on the image it built, runnable by
+  hand against the published tag. Reading the YAML is not it: a
+  `securityContext` or a probe budget is only right once a pod came up under
+  it. For a change to the script itself, break something the manifest declares
+  — the `/tmp` mount, a probe path, `envFrom`, `Recreate` — and watch it go
+  red before it goes green.
 
 The rule extends to claims *about the tools themselves*. Comments and
 documentation here assert how hadolint, zizmor, Trivy, Renovate, BuildKit or

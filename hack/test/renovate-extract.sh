@@ -23,10 +23,11 @@ check="${HACK_DIR}/renovate-extract-check.sh"
 setup_fixtures
 
 # The tree the fixture entry describes: one docs literal of each managed
-# shape, the Dockerfile ARG, and a workflow pin — every manager renovate.json
-# declares, exercised once. The comment marker is spelled through a variable:
-# the check reads every tracked file, this one included, and would otherwise
-# count these fixtures as pins of a shell script no manager reads.
+# shape, the Dockerfile ARG, a workflow pin and the image line of a Kubernetes
+# example manifest — every manager renovate.json declares, exercised once. The
+# comment marker is spelled through a variable: the check reads every tracked
+# file, this one included, and would otherwise count these fixtures as pins of
+# a shell script no manager reads.
 r='# renovate:'
 cp "${here}/../../renovate.json" "${repo}/renovate.json"
 cat >"${repo}/Dockerfile" <<EOF
@@ -47,6 +48,12 @@ docker pull ghcr.io/juherr/steve:steve-1.0.1
 --build-arg STEVE_REF=steve-1.0.1
 Illustrations name steve-X.Y.Z and are matched by nothing; steve-0.9.0 is a measurement.
 EOF
+mkdir -p "${repo}/examples/kubernetes"
+cat >"${repo}/examples/kubernetes/deployment.yaml" <<'EOF'
+containers:
+  - name: steve
+    image: ghcr.io/juherr/steve:steve-1.0.1
+EOF
 git -C "${repo}" add -A
 git -C "${repo}" -c user.name=test -c user.email=test@example.invalid commit -q -m 'the tree the extraction describes'
 # The saved entry is kept indented for the sake of its diffs; Renovate writes
@@ -58,7 +65,8 @@ export RENOVATE_EXTRACT="${work}/extract.log"
 # --- the tree the entry describes passes ----------------------------------
 
 run 'every pin of the fixture tree is extracted' "${check}"
-expect_status 0 && expect_out 'README.md: 2 of 2' && expect_out "${r} comments: 3 of 3" && pass
+expect_status 0 && expect_out 'README.md: 2 of 2' && expect_out 'examples/kubernetes/deployment.yaml: 1 of 1' \
+  && expect_out "${r} comments: 3 of 3" && pass
 
 # The script is documented as runnable by hand, and a hand runs it from
 # wherever the shell is: the tree it checks and the workflow it reads the
@@ -88,6 +96,18 @@ git -C "${repo}" add OTHER.md
 run 'a Markdown file added with a literal and no extraction fails' "${check}"
 expect_status 1 && expect_err 'OTHER.md: 1 SteVe tag literals, 0 extracted' && pass
 git -C "${repo}" rm -q -f OTHER.md
+
+# --- a manifest literal Renovate no longer extracts -----------------------
+#
+# The example manifests are YAML, which the Markdown manager never read; a
+# second image line, or a tag repeated in a comment, is one more literal than
+# the entry knows about, whatever file it sits in.
+
+cp "${repo}/examples/kubernetes/deployment.yaml" "${work}/deployment.yaml.orig"
+printf '    # was ghcr.io/juherr/steve:steve-1.0.1\n' >>"${repo}/examples/kubernetes/deployment.yaml"
+run 'a manifest literal missing from the extraction fails, naming the file' "${check}"
+expect_status 1 && expect_err 'examples/kubernetes/deployment.yaml: 2 SteVe tag literals, 1 extracted' && pass
+cp "${work}/deployment.yaml.orig" "${repo}/examples/kubernetes/deployment.yaml"
 
 # --- a `# renovate:` comment Renovate no longer reads ---------------------
 

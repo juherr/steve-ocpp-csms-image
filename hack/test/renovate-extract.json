@@ -62,6 +62,17 @@
             "replaceString": "STEVE_REF=steve-1.0.1"
           }
         ]
+      },
+      {
+        "packageFile": "examples/kubernetes/deployment.yaml",
+        "deps": [
+          {
+            "depName": "steve-community/steve",
+            "currentValue": "steve-1.0.1",
+            "datasource": "github-releases",
+            "replaceString": "ghcr.io/juherr/steve:steve-1.0.1"
+          }
+        ]
       }
     ]
   }
