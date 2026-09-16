@@ -134,9 +134,13 @@ jobs:
         env:
           TAG: ${{ matrix.tag }}
           ARCH: ${{ matrix.arch }}
-          # Trivy's own registry-auth variables. Its database comes from
-          # ghcr.io, and authenticating avoids the anonymous rate limit — a
-          # common source of flaky runs.
+          # Trivy's own registry-auth variables, for the pull of the image
+          # from ghcr.io. Not for its databases: those come from
+          # mirror.gcr.io (measured, run 35097055316 — and every run since
+          # 0.74.0). The package is public, so this job needs no
+          # `packages: read`: the pull succeeded with `contents: read` and
+          # `security-events: write` alone, on that run and on every weekly
+          # run before it, which had the same token.
           TRIVY_USERNAME: ${{ github.actor }}
           TRIVY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
         run: |
