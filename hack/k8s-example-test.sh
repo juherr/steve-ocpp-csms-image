@@ -8,6 +8,18 @@
 # throwaway kind cluster and checks exactly that, with the database the example
 # leaves out started in-cluster, empty, so the first-boot migration runs too.
 #
+# Two kinds of check. What a fresh deployment cannot exercise is read back from
+# the applied Deployment and compared with what the example promises: one
+# replica and Recreate, which only an upgrade would tell apart from the
+# defaults; the security context, which a pod that came up says nothing about;
+# the three probe paths, because any other path under /steve/manager/ answers
+# a 302 to the sign-in page, which a Kubernetes HTTP probe counts as success
+# (measured) — so a misspelt probe would come up green here and prove nothing
+# in production. Then what only a running pod can tell: identity, filesystem,
+# the Service, the environment the Secret injected — the database password is
+# NOT the image's compiled-in default, so a Secret that stopped reaching the
+# container fails Flyway instead of falling through to `changeme`.
+#
 # Two ways in. Given an IMAGE, one in the local daemon, it is loaded into the
 # cluster and put in place of the manifest's image line: what CI does with the
 # image it has just built, the only image that exists for a tag not yet
@@ -112,9 +124,12 @@ header "MariaDB (${MARIADB_IMAGE}), empty"
 # `content digest … not found` (measured); a single-platform image — the one
 # a build `--load`s, the one IMAGE names — loads fine.
 #
-# Same values as the README's Compose example and hack/migration-test.sh:
-# upstream public placeholders, no data. Ready when the image's own
-# healthcheck says so, as in the Compose example.
+# Same values as the README's Compose example and hack/migration-test.sh, but
+# for the password: `changeme` is what the image falls back to when no
+# DB_PASSWORD reaches it, and a test that used it could not tell the Secret
+# from the default. Upstream public placeholders otherwise, no data. Ready
+# when the image's own healthcheck says so, as in the Compose example.
+db_password='not-the-default'
 kubectl apply -f - >/dev/null <<YAML
 apiVersion: apps/v1
 kind: Deployment
@@ -138,7 +153,7 @@ spec:
             - { name: MARIADB_ROOT_PASSWORD, value: root }
             - { name: MARIADB_DATABASE, value: stevedb }
             - { name: MARIADB_USER, value: steve }
-            - { name: MARIADB_PASSWORD, value: changeme }
+            - { name: MARIADB_PASSWORD, value: ${db_password} }
             - { name: TZ, value: "+00:00" }
           ports:
             - containerPort: 3306
@@ -161,8 +176,10 @@ kubectl rollout status deployment/mariadb --timeout=180s >/dev/null || fail "mar
 echo "mariadb ready."
 
 header "the example"
+auth_user='example-admin' auth_password='example-only'
 kubectl create secret generic steve \
-  --from-literal=DB_PASSWORD=changeme --from-literal=AUTH_USER=admin --from-literal=AUTH_PASSWORD=example-only >/dev/null
+  --from-literal=DB_PASSWORD="${db_password}" --from-literal=AUTH_USER="${auth_user}" \
+  --from-literal=AUTH_PASSWORD="${auth_password}" >/dev/null
 cp "${manifests}/deployment.yaml" "${work}/deployment.yaml"
 edit "${work}/deployment.yaml" 'value: mariadb.example.internal' 'value: mariadb'
 if [ -n "${image}" ]; then
@@ -179,6 +196,28 @@ else
 fi
 kubectl apply -f "${work}/deployment.yaml" -f "${manifests}/service.yaml" >/dev/null
 
+header "what the Deployment declares"
+# Read back from the API server, so that what is asserted is what the cluster
+# holds — defaults filled in, the edits above included.
+container='.spec.template.spec.containers[0]'
+declared() {
+  local path=$1 expected=$2 label=$3 actual
+  actual=$(kubectl get deployment steve -o jsonpath="{${path}}")
+  [ "${actual}" = "${expected}" ] || fail "${label}: '${actual}', expected '${expected}'"
+  echo "${label}: ${actual}"
+}
+declared '.spec.replicas' '1' 'replicas'
+declared '.spec.strategy.type' 'Recreate' 'strategy'
+declared '.spec.template.spec.securityContext.runAsNonRoot' 'true' 'runAsNonRoot'
+declared '.spec.template.spec.securityContext.seccompProfile.type' 'RuntimeDefault' 'seccompProfile'
+declared "${container}.securityContext.allowPrivilegeEscalation" 'false' 'allowPrivilegeEscalation'
+declared "${container}.securityContext.capabilities.drop" '["ALL"]' 'capabilities.drop'
+declared "${container}.securityContext.readOnlyRootFilesystem" 'true' 'readOnlyRootFilesystem'
+for probe in startupProbe readinessProbe livenessProbe; do
+  declared "${container}.${probe}.httpGet.path" '/steve/manager/signin' "${probe} path"
+done
+
+header "the pod"
 # Not `rollout status`: a container that cannot start is CrashLoopBackOff for
 # the whole timeout under it, where the restart count says so at once. The
 # startupProbe is the slow path — its budget is what the timeout has to cover.
@@ -199,7 +238,7 @@ for ((i = 0; i < steve_timeout; i += 5)); do
 done
 [ "${ready:-false}" = "true" ] || fail "no ready pod after ${steve_timeout}s"
 
-header "what the manifest declares"
+header "what only a running pod can tell"
 uid=$(kubectl exec "${pod}" -- id -u); gid=$(kubectl exec "${pod}" -- id -g)
 [ "${uid}:${gid}" = "10001:10001" ] || fail "runs as ${uid}:${gid}, expected 10001:10001"
 echo "runs as ${uid}:${gid}."
@@ -207,6 +246,14 @@ if kubectl exec "${pod}" -- touch /app/.write-test 2>/dev/null; then fail "root 
 echo "root filesystem read-only."
 kubectl exec "${pod}" -- sh -c 'touch /tmp/.write-test && rm /tmp/.write-test' || fail "/tmp is not writable"
 echo "/tmp writable."
+# The Secret's keys, as the container sees them. Flyway has already proven
+# DB_PASSWORD by connecting with a password that is not the default; the two
+# the application reads are checked the same way, without a sign-in.
+for var in DB_PASSWORD="${db_password}" AUTH_USER="${auth_user}" AUTH_PASSWORD="${auth_password}"; do
+  actual=$(kubectl exec "${pod}" -- sh -c "printf '%s' \"\$${var%%=*}\"")
+  [ "${actual}" = "${var#*=}" ] || fail "${var%%=*} in the container is '${actual}', expected '${var#*=}': the Secret is not reaching it"
+done
+echo "DB_PASSWORD, AUTH_USER, AUTH_PASSWORD injected from the Secret."
 # Through the Service by its cluster DNS name, from inside the pod — the
 # image ships curl for its healthcheck, so no second image is needed.
 code=$(kubectl exec "${pod}" -- curl -sS -o /dev/null -w '%{http_code}' http://steve:8180/steve/manager/signin || true)

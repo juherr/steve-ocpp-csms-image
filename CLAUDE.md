@@ -50,8 +50,8 @@ release as second argument — on a schema that release wrote. So:
   hand against the published tag. Reading the YAML is not it: a
   `securityContext` or a probe budget is only right once a pod came up under
   it. For a change to the script itself, break something the manifest declares
-  — the `/tmp` mount, the probe path — and watch it go red before it goes
-  green.
+  — the `/tmp` mount, a probe path, `envFrom`, `Recreate` — and watch it go
+  red before it goes green.
 
 The rule extends to claims *about the tools themselves*. Comments and
 documentation here assert how hadolint, zizmor, Trivy, Renovate, BuildKit or

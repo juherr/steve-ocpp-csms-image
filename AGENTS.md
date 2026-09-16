@@ -27,7 +27,7 @@ this repository — if something must change in SteVe, it changes upstream.
 | `hack/release-drift.sh` | Published image vs the `release` branch; runnable by hand |
 | `hack/release-preflight.sh` | Would releasing HEAD publish anything, or only move a digest; runnable by hand |
 | `hack/migration-test.sh` | Fresh-database migration, restart and upgrade scenarios against the built image; what CI runs after the build, runnable by hand |
-| `hack/k8s-example-test.sh` | Applies `examples/kubernetes/` to a throwaway kind cluster and checks a pod comes up under what it declares; run by the amd64 build job on the image it built, runnable by hand against the published tag |
+| `hack/k8s-example-test.sh` | Applies `examples/kubernetes/` to a throwaway kind cluster, reads back what the Deployment declares (replicas, `Recreate`, security context, probe paths) and checks a pod comes up under it with the Secret reaching it; run by the amd64 build job on the image it built, runnable by hand against the published tag |
 | `hack/image-config.sh` | Image config of a published tag, single manifest or index; what `release-drift.sh`, `release-preflight.sh`, the three scripts below, the build workflow and the `CLAUDE.md` recipe read through |
 | `hack/scan-targets.sh` | The images `scan-published.yml` scans: one (tag, arch) per supported platform each of the newest tags carries; runnable by hand |
 | `hack/check-pushed-digest.sh` | Is the digest a build job pushed the image it probed; run by each build job on `release` |
@@ -306,9 +306,17 @@ The Kubernetes example is proven in two steps, neither of which is reading the
 YAML. kubeconform, the exact command `lint.yml` runs, says the manifests are
 valid against the API schemas; `hack/k8s-example-test.sh` says a pod actually
 comes up under them — as `10001:10001`, root filesystem read-only and `/tmp`
-writable, the probes finding the sign-in page, the Service reaching the pod —
-in a throwaway [kind](https://kind.sigs.k8s.io) cluster with an empty MariaDB
-started in it, so the first-boot migration runs too. The amd64 build job runs
+writable, the Service reaching the pod, the Secret's three keys in the
+container's environment with a database password that is *not* the compiled-in
+default, so a Secret that stopped reaching the container fails Flyway rather
+than falling through to `changeme` — in a throwaway
+[kind](https://kind.sigs.k8s.io) cluster with an empty MariaDB started in it,
+so the first-boot migration runs too. What a fresh deployment cannot exercise
+is read back from the applied Deployment and compared with the example's
+promises: one replica and `Recreate`, the security context, and the three
+probe paths — any other path under `/steve/manager/` answers a 302 to the
+sign-in page, which a Kubernetes HTTP probe counts as success (measured), so a
+misspelt probe would come up green and prove nothing. The amd64 build job runs
 it on the image it has just built, loaded into the cluster rather than pulled:
 for a tag not yet published that image is the only one there is. By hand,
 without an argument, it applies the manifest as published and the cluster
