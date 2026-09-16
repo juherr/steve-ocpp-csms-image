@@ -42,6 +42,11 @@ spec:
           # Pin by digest in production — the index digest, see "Tags" in the
           # repository README: this tag is republished on a JRE update.
           image: ghcr.io/juherr/steve:steve-3.14.1
+          # Because the tag moves: for a tag that is not `latest` Kubernetes
+          # defaults to IfNotPresent, and a pod recreated on a node that
+          # cached the tag would keep the old JRE. With a digest pinned this
+          # costs a manifest check per start and changes nothing.
+          imagePullPolicy: Always
           ports:
             - name: http
               containerPort: 8180

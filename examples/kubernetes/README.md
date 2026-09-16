@@ -4,9 +4,10 @@ A reference deployment, kept deliberately small: a `Deployment` and a
 `Service`, plain manifests, no Helm chart. It is an **example**, not a
 manifest for every cluster — the namespace, the Ingress, the certificate
 issuer, the storage class and the database are your cluster's decisions, and
-the manifests leave them out rather than guess. Upstream reached the same
-conclusion about its own manifests ([steve#1351]); what this example fixes is
-only what *this image* needs to run.
+the manifests leave them out rather than guess. Upstream weighed the same
+trade-off for its own manifests — context-dependent, so of limited use out of
+the box, yet a starting point some users asked to keep ([steve#1351]); what
+this example fixes is only what *this image* needs to run.
 
 [steve#1351]: https://github.com/steve-community/steve/issues/1351
 
@@ -75,7 +76,9 @@ only what *this image* needs to run.
    (Measured in a [kind](https://kind.sigs.k8s.io) cluster on an Apple Silicon
    laptop, where `steve-3.14.1` — an amd64-only tag — ran emulated: the pod
    was ready 130 s after `apply`, image pull included. A native run is
-   faster; the probe budget below is sized for the slow case.)
+   faster; the probe budget below is sized for the slow case. CI repeats this
+   on every image it builds — `hack/k8s-example-test.sh`, runnable by hand —
+   so the manifests are known to bring the image up, not only to parse.)
 
 4. Reach it. The `Service` is in-cluster only; for a look before any Ingress
    exists:
@@ -122,14 +125,24 @@ so the container's memory limit is what sizes the heap; without one the JVM
 sizes itself on the node. `1Gi` is a starting point — 700 MiB in use after a
 first boot, measured — not a recommendation for your load.
 
+**`imagePullPolicy: Always`.** The tag is republished on a JRE update, and
+for a tag other than `latest` Kubernetes defaults to `IfNotPresent`: a pod
+recreated on a node that already holds the tag would keep running the old
+image. `Always` makes every start check the registry; with a digest pinned
+that check finds the same image and costs a manifest fetch, nothing more.
+
 **Probes.** All three ask for the sign-in page, `GET /steve/manager/signin`,
 the same URL as the Compose healthcheck. It answers once Jetty and the Spring
 context are up, and does **not** touch the database — on purpose for
 liveness, where a database outage should not restart SteVe, and for lack of
-anything better for readiness: upstream exposes no health endpoint. The
-`startupProbe` allows 30 × 10 s = 300 s before liveness starts counting,
-which covers a first boot that migrates everything, emulated; a restart on a
-migrated schema takes a fraction of it.
+anything better for readiness: upstream exposes no health endpoint. It is
+also the one page that answers `200` itself: any other path under
+`/steve/manager/` redirects an anonymous request to it with a `302`, which
+Kubernetes counts as a success too (200–399), so a probe on a misspelt UI
+path would pass without proving anything — measured, with
+`/steve/manager/nowhere`. The `startupProbe` allows 30 × 10 s = 300 s before
+liveness starts counting, which covers a first boot that migrates everything,
+emulated; a restart on a migrated schema takes a fraction of it.
 
 ## Exposing it
 
