@@ -37,8 +37,12 @@ else
     || { status=$?; printf '%s\n' "${log}" >&2; die "renovate exited ${status}"; }
 fi
 # One JSON object per line at LOG_FORMAT=json; the extraction is the entry
-# named below, its packageFiles keyed by manager.
-extracted=$(printf '%s\n' "${log}" | jq -c 'select(.msg? == "Extracted dependencies") | .packageFiles' 2>/dev/null | tail -1)
+# named below, its packageFiles keyed by manager. Lines that are not JSON —
+# the image pull, which `docker run` prints on a runner that has never seen
+# the image — are skipped rather than ending the read (measured: jq stops at
+# the first one and the check failed with exit 5, not with a finding).
+extracted=$(printf '%s\n' "${log}" \
+  | jq -Rc 'fromjson? | select(.msg? == "Extracted dependencies") | .packageFiles' | tail -1)
 [ -n "${extracted}" ] || die 'no "Extracted dependencies" entry in the Renovate log'
 
 failed=0
