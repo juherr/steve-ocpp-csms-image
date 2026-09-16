@@ -10,27 +10,31 @@
 # SteVe-tag dependencies as it has literals in the shapes renovate.json
 # declares. The shapes are read from renovate.json, not copied here.
 #
-# Usage:  ./hack/renovate-extract-check.sh
+# Usage:  ./hack/renovate-extract-check.sh    (from anywhere in the repository)
 # Env:    RENOVATE_IMAGE    the Renovate image to run; defaults to the pin in
-#                           .github/workflows/lint.yml so that there is one
-#                           copy of it
+#                           the repository's .github/workflows/lint.yml so
+#                           that there is one copy of it
 #         RENOVATE_EXTRACT  a saved Renovate JSON log to read instead of
 #                           running the image (hack/test/)
 # Exit:   0 every pin extracted · 1 a pin is not · 2 usage or tooling
 
 set -euo pipefail
 
+# The tree under check is the repository of the working directory, and so is
+# the workflow the image pin is read from — not a path relative to the
+# script, which would leave the repository when the script is invoked
+# relatively from a subdirectory (measured, from hack/).
 root=$(git rev-parse --show-toplevel)
 cd "${root}"
-
-workflow="$(dirname "$0")/../.github/workflows/lint.yml"
-RENOVATE_IMAGE="${RENOVATE_IMAGE:-$(sed -n 's/^  RENOVATE_IMAGE: "\(.*\)"$/\1/p' "${workflow}")}"
 
 die() { printf 'renovate-extract-check: %s\n' "$1" >&2; exit 2; }
 
 if [ -n "${RENOVATE_EXTRACT:-}" ]; then
   log=$(cat "${RENOVATE_EXTRACT}")
 else
+  workflow=".github/workflows/lint.yml"
+  [ -f "${workflow}" ] || die "no ${workflow} in ${root}"
+  RENOVATE_IMAGE="${RENOVATE_IMAGE:-$(sed -n 's/^  RENOVATE_IMAGE: "\(.*\)"$/\1/p' "${workflow}")}"
   [ -n "${RENOVATE_IMAGE}" ] || die "RENOVATE_IMAGE is unset and no pin was found in ${workflow}"
   log=$(docker run --rm -v "${root}:/repo" -w /repo -e LOG_LEVEL=debug -e LOG_FORMAT=json \
     "${RENOVATE_IMAGE}" --platform=local --dry-run=extract 2>&1) \

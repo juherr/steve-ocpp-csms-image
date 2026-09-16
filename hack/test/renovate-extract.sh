@@ -39,6 +39,8 @@ cat >"${repo}/.github/workflows/lint.yml" <<EOF
 env:
   ${r} datasource=docker depName=hadolint/hadolint
   HADOLINT_IMAGE: "hadolint/hadolint:v2.0.0"
+  ${r} datasource=docker depName=renovate/renovate
+  RENOVATE_IMAGE: "renovate/renovate:1.0.0"
 EOF
 cat >"${repo}/README.md" <<'EOF'
 docker pull ghcr.io/juherr/steve:steve-1.0.1
@@ -52,7 +54,22 @@ export RENOVATE_EXTRACT="${here}/renovate-extract.json"
 # --- the tree the entry describes passes ----------------------------------
 
 run 'every pin of the fixture tree is extracted' "${check}"
-expect_status 0 && expect_out 'README.md: 2 of 2' && expect_out "${r} comments: 2 of 2" && pass
+expect_status 0 && expect_out 'README.md: 2 of 2' && expect_out "${r} comments: 3 of 3" && pass
+
+# The script is documented as runnable by hand, and a hand runs it from
+# wherever the shell is: the tree it checks and the workflow it reads the
+# image pin from are the repository of the working directory, not a path
+# relative to the script — which, invoked as `./renovate-extract-check.sh`
+# from hack/, once resolved lint.yml outside the repository (measured).
+mkdir -p "${repo}/hack"
+ln -s "${check}" "${repo}/hack/renovate-extract-check.sh"
+run 'invoked relatively from a subdirectory, the tree is still the repository' \
+  bash -c 'cd hack && ./renovate-extract-check.sh'
+expect_status 0 && expect_out 'README.md: 2 of 2' && pass
+
+run 'the image pin is read from the workflow of the tree under check' \
+  env -u RENOVATE_EXTRACT bash -c 'cd hack && ./renovate-extract-check.sh'
+expect_status 2 && expect_err 'unhandled invocation: docker run' && expect_err 'renovate/renovate:1.0.0 --platform=local --dry-run=extract' && pass
 
 # --- a docs literal Renovate no longer extracts ---------------------------
 
