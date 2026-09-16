@@ -13,14 +13,15 @@
 # So this walks both shapes. On an index it takes the linux/IMAGE_ARCH entry
 # (amd64 unless asked otherwise), or failing that the first platform entry: the
 # `revision` label is the same on every platform of one build, so one platform
-# answers the question the callers ask, and they leave the default alone. The
-# build workflow is the one reader that sets IMAGE_ARCH — to its runner's own
-# architecture, before running the upgrade scenario against the previous
-# release, which may predate the arm64 variant; it then reads `.architecture`
-# off the answer, which is why a single manifest comes back unfiltered. The
-# entries skipped are buildx attestations — `unknown/unknown` platform,
-# annotated `vnd.docker.reference.type: attestation-manifest` — which carry no
-# image config at all.
+# answers the question the callers ask, and they leave the default alone. Two
+# readers set IMAGE_ARCH and read `.architecture` off the answer, which is why
+# a single manifest comes back unfiltered: the build workflow, for its
+# runner's own architecture before running the upgrade scenario against the
+# previous release, which may predate the arm64 variant; and
+# hack/scan-targets.sh, once per architecture, to learn which platforms a tag
+# carries. The entries skipped are buildx attestations — `unknown/unknown`
+# platform, annotated `vnd.docker.reference.type: attestation-manifest` —
+# which carry no image config at all.
 #
 # Every failure exits 1 with one `image-config:` line on stderr saying why;
 # when the registry is the cause, curl's own diagnostic comes first, kept on

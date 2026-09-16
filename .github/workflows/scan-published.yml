@@ -15,6 +15,19 @@
 # SteVe release is already pinned in the Dockerfile and echoed in the README,
 # which move together (see AGENTS.md); one more copy would rot.
 #
+# Every supported platform a tag carries is scanned, not just the runner's:
+# given an index, Trivy picks the platform matching the runner — linux/amd64 —
+# and the arm64 manifest is never looked at. The two are built from the same
+# Dockerfile at the same moment, with the same Ubuntu package versions and the
+# same jars, so the two reports are expected to be *almost* identical; the
+# JRE, libc and everything else compiled per architecture is where "almost"
+# lives, and that difference is the thing worth seeing. Scanning amd64 only
+# and documenting it was considered and rejected: the scan is report-only,
+# halving it saves a few runner minutes a week and buys a blind spot.
+# "Supported" is the two platforms the build produces: a third architecture
+# added to the build has to be added to hack/scan-targets.sh as well, or it
+# ships unscanned.
+#
 # GitHub disables scheduled workflows after 60 days without repository activity;
 # on a packaging repository that can happen between two SteVe releases. If the
 # weekly run goes quiet, that is why — re-enable it from the Actions tab.
@@ -43,12 +56,15 @@ env:
 
 jobs:
   discover:
-    name: list published tags
+    name: list the images to scan
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
-      tags: ${{ steps.tags.outputs.tags }}
+      matrix: ${{ steps.targets.outputs.matrix }}
     steps:
+      # For hack/scan-targets.sh and the helper it reads through.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
       # Asked to the registry, not to /users/juherr/packages/…: that REST
       # endpoint is scoped to the *user* and needs a personal token with
       # read:packages, which GITHUB_TOKEN is not. The registry answers the same
@@ -56,46 +72,34 @@ jobs:
       # permission at all — and no pagination handling, unlike `gh api
       # --paginate`, which emits one JSON document per page and would quietly
       # write a multi-line value to GITHUB_OUTPUT past 30 versions.
-      - name: List the release tags on GHCR
-        id: tags
+      #
+      # Which tags, and which platforms of each, is the script's to decide —
+      # see its header — so that the answer is proven offline by
+      # hack/test/registry-readers.sh rather than by the weekly run. It fails
+      # on a tag it cannot read, and so does this job: that is a broken
+      # publication, not a scan to skip quietly.
+      - name: List the release tags on GHCR and the platforms of each
+        id: targets
         run: |
           set -euo pipefail
-          token=$(curl -fsS \
-            "https://ghcr.io/token?scope=repository:${REGISTRY_REPO}:pull&service=ghcr.io" \
-            | jq -r .token)
-          # Anything that is not a steve-X.Y.Z release tag is not ours to
-          # monitor — same shape the build validates ARG STEVE_REF against.
-          #
-          # Only the three most recent releases: an immutable old tag's CVE list
-          # only ever grows and the answer for whoever pinned it is always "move
-          # up", which the newest scan already says. Scanning them forever would
-          # leave one stale `trivy-<retired tag>` category in the Security tab
-          # per release, for ever.
-          #
-          # sort_by on the numeric components, not plain sort: lexically
-          # steve-3.9.0 sorts after steve-3.13.0.
-          tags=$(curl -fsS -H "Authorization: Bearer ${token}" \
-            "https://ghcr.io/v2/${REGISTRY_REPO}/tags/list?n=1000" \
-            | jq -c '[(.tags // [])[] | select(test("^steve-[0-9]+\\.[0-9]+\\.[0-9]+$"))]
-                     | sort_by(ltrimstr("steve-") | split(".") | map(tonumber))
-                     | .[-3:]')
-          echo "Tags to scan: ${tags}"
-          echo "tags=${tags}" >> "$GITHUB_OUTPUT"
+          matrix=$(./hack/scan-targets.sh)
+          echo "Images to scan: ${matrix}"
+          echo "matrix=${matrix}" >> "$GITHUB_OUTPUT"
 
   scan:
-    name: trivy ${{ matrix.tag }}
+    name: trivy ${{ matrix.tag }} linux/${{ matrix.arch }}
     needs: discover
-    if: needs.discover.outputs.tags != '[]'
+    if: needs.discover.outputs.matrix != '[]'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
       fail-fast: false
-      # A matrix rather than a loop in a single job — even though it is usually
-      # one element — because upload-sarif is an *action* and each tag needs its
-      # own `category:`. A `for tag in …` loop cannot invoke an action per
-      # iteration, so it would force one merged SARIF and lose the per-tag view.
+      # A matrix rather than a loop in a single job because upload-sarif is an
+      # *action* and each (tag, platform) needs its own `category:`. A `for`
+      # loop cannot invoke an action per iteration, so it would force one
+      # merged SARIF and lose the per-image view.
       matrix:
-        tag: ${{ fromJSON(needs.discover.outputs.tags) }}
+        include: ${{ fromJSON(needs.discover.outputs.matrix) }}
     env:
       # renovate: datasource=docker depName=aquasec/trivy
       TRIVY_IMAGE: "aquasec/trivy:0.74.0"
@@ -113,9 +117,15 @@ jobs:
       # Scanned once to JSON, then rendered twice offline. Running `trivy image`
       # per output format would re-pull the ~490 MB image and re-download the
       # vulnerability database for the second render.
-      - name: Scan ${{ matrix.tag }}
+      #
+      # --platform selects the entry of the index to scan; the runner's own
+      # architecture does not matter, Trivy reads the layers, it does not run
+      # them. On the single-manifest tags it is a no-op, which is why
+      # hack/scan-targets.sh only ever asks for a platform the tag carries.
+      - name: Scan ${{ matrix.tag }} linux/${{ matrix.arch }}
         env:
           TAG: ${{ matrix.tag }}
+          ARCH: ${{ matrix.arch }}
           # Trivy's own registry-auth variables. Its database comes from
           # ghcr.io, and authenticating avoids the anonymous rate limit — a
           # common source of flaky runs.
@@ -126,6 +136,7 @@ jobs:
           docker run --rm -v "${PWD}:/work" -w /work \
             -e TRIVY_USERNAME -e TRIVY_PASSWORD \
             "${TRIVY_IMAGE}" image "ghcr.io/${REGISTRY_REPO}:${TAG}" \
+              --platform "linux/${ARCH}" \
               --scanners vuln,secret --exit-code 0 \
               --format json --output trivy.json
 
@@ -138,10 +149,11 @@ jobs:
             convert --scanners vuln,secret \
               --format table --severity HIGH,CRITICAL trivy.json
 
-      # One category per tag, otherwise each upload would overwrite the previous
-      # one and the Security tab would only ever show the last tag scanned.
+      # One category per tag and platform, otherwise each upload would overwrite
+      # the previous one and the Security tab would only ever show the last
+      # image scanned.
       - name: Upload the report to code scanning
         uses: github/codeql-action/upload-sarif@e58424170fb0262c8d7ed60a2e84b9bffe205c67 # codeql-bundle-v2.26.1
         with:
           sarif_file: trivy.sarif
-          category: trivy-${{ matrix.tag }}
+          category: trivy-${{ matrix.tag }}-${{ matrix.arch }}

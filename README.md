@@ -447,11 +447,14 @@ packaging on `release`, and warns when they diverge — a build that failed afte
 the branch moved would otherwise leave the branch claiming a release that never
 landed.
 
-Separately, every published `steve-X.Y.Z` tag is re-scanned weekly with
-[Trivy](https://trivy.dev) and the results land in the repository's *Security*
-tab. Scanning on a schedule rather than at build time is deliberate: an image is
-clean the day it is built, and what you need to know is whether the tag you
-pinned has drifted since.
+Separately, the three most recent published `steve-X.Y.Z` tags are re-scanned
+weekly with [Trivy](https://trivy.dev), each of their platforms separately, and
+the results land in the repository's *Security* tab, one category per tag and
+architecture. Scanning on a schedule rather than at build time is deliberate:
+an image is clean the day it is built, and what you need to know is whether
+the tag you pinned has drifted since. An older tag is not monitored: its CVE
+list only ever grows, and the answer for whoever pinned it is always to move
+up, which the newest scan already says.
 
 ## Third-party licenses
 
