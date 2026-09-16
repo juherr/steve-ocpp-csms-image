@@ -49,7 +49,11 @@ Illustrations name steve-X.Y.Z and are matched by nothing; steve-0.9.0 is a meas
 EOF
 git -C "${repo}" add -A
 git -C "${repo}" -c user.name=test -c user.email=test@example.invalid commit -q -m 'the tree the extraction describes'
-export RENOVATE_EXTRACT="${here}/renovate-extract.json"
+# The saved entry is kept indented for the sake of its diffs; Renovate writes
+# one object per line, which is what the script reads, so it is compacted
+# back into that shape here.
+jq -c . "${here}/renovate-extract.json" >"${work}/extract.log"
+export RENOVATE_EXTRACT="${work}/extract.log"
 
 # --- the tree the entry describes passes ----------------------------------
 
@@ -107,7 +111,7 @@ expect_status 2 && expect_err 'no "Extracted dependencies" entry' && pass
 # come before the entry and must not end the read (measured, run 35075741084).
 git -C "${repo}" checkout -q -- .github/workflows/lint.yml
 { printf 'Unable to find image %s locally\n44.93.6: Pulling from renovate/renovate\n' 'renovate/renovate:44.93.6'
-  cat "${here}/renovate-extract.json"; } >"${work}/pulled.log"
+  cat "${work}/extract.log"; } >"${work}/pulled.log"
 run 'a log with the image pull before the entry is read past the pull' \
   env RENOVATE_EXTRACT="${work}/pulled.log" "${check}"
 expect_status 0 && expect_out 'README.md: 2 of 2' && pass
