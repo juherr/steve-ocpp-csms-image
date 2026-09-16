@@ -20,7 +20,7 @@ this repository — if something must change in SteVe, it changes upstream.
 | `entrypoint.sh` | Runs Flyway migrations against the runtime database, then starts the `.war` |
 | `flyway-callbacks/afterConnect.sql` | Forces `default_storage_engine=InnoDB`; replaces `-initSql`, removed in Flyway 13 |
 | `.github/workflows/build-image.yml` | One native build and probe per architecture, merged into an index on `release` — see its `on:` block for the triggers |
-| `.github/workflows/lint.yml` | hadolint / `docker build --check` / shellcheck / actionlint / zizmor, the four suites under `hack/test/`, `renovate-config-validator` and `hack/renovate-extract-check.sh` |
+| `.github/workflows/lint.yml` | hadolint / `docker build --check` / shellcheck / actionlint / zizmor, the five suites under `hack/test/`, `renovate-config-validator` and `hack/renovate-extract-check.sh` |
 | `.github/workflows/scan-published.yml` | Weekly Trivy scan of the tags already on GHCR, one job per image `hack/scan-targets.sh` lists |
 | `.github/workflows/release.yml` | The release, from the Actions tab: preflight, fast-forward `release`, start the build |
 | `.github/workflows/release-drift.yml` | Schedules `hack/release-drift.sh` — see that script for what it compares |
@@ -32,7 +32,8 @@ this repository — if something must change in SteVe, it changes upstream.
 | `hack/check-pushed-digest.sh` | Is the digest a build job pushed the image it probed; run by each build job on `release` |
 | `hack/publish-index.sh` | Checks the two platform digests and the index they would form, then makes the tag and prints the digest to pin; run by the `publish` job on `release` |
 | `hack/renovate-extract-check.sh` | Is every pin one Renovate extracts — the `# renovate:` comments and the Markdown examples; run by `lint.yml`, runnable by hand |
-| `hack/test/` | Offline tests of the six scripts above that read the registry, against a fixture registry served by a `curl` shim and a `docker` that records instead of acting, of the Renovate check against a saved extraction, and of the README's `MaxRAMPercentage` against `entrypoint.sh` |
+| `hack/lint.sh` | The steps of `lint.yml`, run locally — read out of the workflow, pins and commands, not copied from it |
+| `hack/test/` | Offline tests of the six scripts above that read the registry, against a fixture registry served by a `curl` shim and a `docker` that records instead of acting, of the Renovate check against a saved extraction, of the README's `MaxRAMPercentage` against `entrypoint.sh`, and of `hack/lint.sh` against a fixture workflow |
 | `README.md` | User-facing documentation |
 | `.github/assets/` | Images referenced by `README.md`; outside the build context |
 | `NOTICE` | License aggregation of the produced image — must stay accurate |
@@ -231,23 +232,29 @@ differed. Two habits close it: run scripts through their shebang rather than
 pasting their contents (`./hack/release-drift.sh`, not a copy of its body), and
 prefer arrays to space-separated strings when a command takes a path list.
 
-The linters are the cheap gate. Run the steps of the `lint` job in
-`.github/workflows/lint.yml` — that file pins the images, so copying the
-commands here would only create a second version to keep in sync. zizmor is
+The linters are the cheap gate. `./hack/lint.sh` runs the steps of
+`.github/workflows/lint.yml` — every job, or the ones named as arguments,
+`-n` to list them — by reading them out of the workflow: that file pins the
+images and holds the commands, so a copy here or in the script would only be
+a second version to keep in sync, and the script has none. A step written in
+a shape it does not read (`run: >`, a bare `run:`) is refused by line, not
+skipped, and its suite parses the real file. zizmor is
 the one that reads the workflows for what actionlint does not — pins,
 permissions, template injection, checkouts that keep the token — and it
 gates, offline: a finding fails the pull request, and a waiver is a comment
 on the line that earned it, with its reason, as the `# hadolint ignore=`
 ones are. Every checkout sets `persist-credentials: false` except the one in
 `release.yml`, which says why it keeps them. Then the
-four suites under `hack/test/`, which are the whole test suite, no network:
+five suites under `hack/test/`, which are the whole test suite, no network:
 `registry-readers.sh` for `image-config.sh`, the two release readers and
 `scan-targets.sh`, `release-publish.sh` for the two scripts that run only on
 `release` — `check-pushed-digest.sh` in each build job and `publish-index.sh`
 in the `publish` job — `renovate-extract.sh` for the Renovate check below,
-against a saved extraction, and `readme-entrypoint.sh`, which holds the
+against a saved extraction, `readme-entrypoint.sh`, which holds the
 README's `-XX:MaxRAMPercentage` to the value `entrypoint.sh` sets — the one
-runtime number the documentation quotes. The second suite is the only recurring
+runtime number the documentation quotes — and `lint-script.sh` for
+`hack/lint.sh`, against a fixture workflow whose steps only echo. The second
+suite is the only recurring
 coverage of the publish path, which no pull request exercises: a `docker`
 shim records every `imagetools create -t`, and the suite proves that a
 candidate failing a check never reaches one. A change to any of those seven

@@ -89,7 +89,10 @@ jobs:
   # than GHCR: the multi-arch shapes the readers must handle are not published
   # under juherr/steve yet, and the publish path runs only on `release` — the
   # release gate should not be the first place either is met. And the one
-  # runtime value the README quotes from entrypoint.sh, compared to it.
+  # runtime value the README quotes from entrypoint.sh, compared to it, and
+  # hack/lint.sh, which runs this file's steps locally by reading them out of
+  # it — its suite includes parsing this very file, so a step written in a
+  # shape it cannot read is red here, not silently skipped on a laptop.
   hack-tests:
     name: Registry readers & release scripts (fixtures)
     runs-on: ubuntu-latest
@@ -102,6 +105,7 @@ jobs:
       - run: ./hack/test/release-publish.sh
       - run: ./hack/test/renovate-extract.sh
       - run: ./hack/test/readme-entrypoint.sh
+      - run: ./hack/test/lint-script.sh
 
   # renovate.json is load-bearing — three regex managers, and a broken one
   # freezes pins silently — and nothing else reads it before Renovate does.
