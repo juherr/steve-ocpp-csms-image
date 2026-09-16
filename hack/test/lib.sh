@@ -10,7 +10,7 @@
 # and the scripts under test are the real ones, unmodified.
 #
 # Linting follows the `source` only when this file is among the inputs —
-# `shellcheck $(git ls-files '*.sh')`, which is what lint.yml runs — or with
+# every script in one shellcheck invocation, as lint.yml does — or with
 # `-x`; a suite checked on its own reports the variables set here as unset.
 
 HACK_DIR="${HACK_DIR:-$(dirname "${here}")}"

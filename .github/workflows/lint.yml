@@ -7,8 +7,7 @@
 #
 # The linters run from their own pinned images instead of third-party actions:
 # one less thing to pin by SHA, and the exact command below is runnable locally.
-# The two that do not are shellcheck and `docker build --check`, which are the
-# runner's own.
+# The one that does not is `docker build --check`, which is the runner's own.
 
 name: Lint
 
@@ -32,6 +31,8 @@ env:
   ACTIONLINT_IMAGE: "rhysd/actionlint:1.7.12"
   # renovate: datasource=docker depName=ghcr.io/yannh/kubeconform
   KUBECONFORM_IMAGE: "ghcr.io/yannh/kubeconform:v0.8.0-alpine"
+  # renovate: datasource=docker depName=koalaman/shellcheck
+  SHELLCHECK_IMAGE: "koalaman/shellcheck:v0.11.0"
   # renovate: datasource=docker depName=renovate/renovate
   RENOVATE_IMAGE: "renovate/renovate:44.93.6"
   # renovate: datasource=docker depName=ghcr.io/zizmorcore/zizmor
@@ -65,9 +66,17 @@ jobs:
           git ls-files '*Dockerfile*' \
             | xargs -r -I{} docker build --check -f {} .
 
-      # shellcheck ships with the GitHub-hosted runner image.
+      # Pinned rather than the runner's own copy, which lags releases: a
+      # directive written for the local 0.11 (SC2329) met the runner's older
+      # code for the same finding (SC2317) and left a pull request red — one
+      # round trip per rule rename (#33). `koalaman/shellcheck`, not the
+      # `-alpine` one: for shellcheck that is a separate image with a shell
+      # and no entrypoint (measured), and this step needs neither — the file
+      # list goes straight to the binary the image runs.
       - name: shellcheck (shell scripts)
-        run: git ls-files '*.sh' | xargs -r shellcheck
+        run: |
+          git ls-files '*.sh' \
+            | xargs -r docker run --rm -v "${PWD}:/repo" -w /repo "${SHELLCHECK_IMAGE}"
 
       - name: actionlint (workflows)
         run: |
