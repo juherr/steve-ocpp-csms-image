@@ -15,7 +15,13 @@
 #                                               contributes every entry it
 #                                               holds, attestations included
 #                                               (that is what the #27 spike
-#                                               measured with provenance on)
+#                                               measured with provenance on);
+#                                               each `--annotation index:K=V`
+#                                               lands in the index's
+#                                               annotations, as buildx puts it
+#                                               (measured against a registry:2;
+#                                               the other prefixes are not
+#                                               handled, the scripts use none)
 #   buildx imagetools create -t TAG REF...      the same index, written to the
 #                                               fixture registry under TAG, and
 #                                               one line appended to
@@ -45,10 +51,21 @@ manifest_file() {
   echo "${FAKE_REGISTRY}/v2/${repo}/manifests/${ref#*@}"
 }
 
-# The index buildx would merge the references into.
+# The index buildx would merge the references into. `--annotation index:K=V`
+# may come anywhere among the references, as it does on the command line.
 merged_index() {
-  local ref file config
-  for ref in "$@"; do
+  local ref file config annotations='{}'
+  local refs=()
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --annotation)
+        case "$2" in index:*=*) ;; *) echo "fake-docker: unhandled annotation '$2'" >&2; exit 2 ;; esac
+        annotations=$(jq -c --arg k "${2#index:}" '. + {($k | split("=")[0]): ($k | sub("^[^=]*="; ""))}' <<<"${annotations}")
+        shift 2 ;;
+      *) refs+=("$1"); shift ;;
+    esac
+  done
+  for ref in "${refs[@]}"; do
     file=$(manifest_file "${ref}")
     [ -f "${file}" ] || { echo "fake-docker: ${ref}: not found" >&2; exit 1; }
     if jq -e '.manifests' "${file}" >/dev/null 2>&1; then
@@ -59,7 +76,9 @@ merged_index() {
         '{mediaType: "application/vnd.oci.image.manifest.v1+json", digest: $digest, size: $size,
           platform: {architecture: .architecture, os: .os}}' "${config}"
     fi
-  done | jq -s '{schemaVersion: 2, mediaType: "application/vnd.oci.image.index.v1+json", manifests: .}'
+  done | jq -s --argjson a "${annotations}" \
+    '{schemaVersion: 2, mediaType: "application/vnd.oci.image.index.v1+json", manifests: .}
+     + (if $a == {} then {} else {annotations: $a} end)'
 }
 
 case "$1 $2 $3" in

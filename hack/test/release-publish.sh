@@ -49,6 +49,14 @@ run 'the published tag reads back as exactly linux/amd64 and linux/arm64' \
   jq -c '[.manifests[].platform | "\(.os)/\(.architecture)"]' "${FAKE_REGISTRY}/v2/juherr/steve/manifests/steve-1.0.1"
 expect_status 0 && expect_out '["linux/amd64","linux/arm64"]' && pass
 
+# GHCR shows a package description read from the index's annotations, not
+# from the platform manifests' labels — on an index without one the package
+# page says "No description provided" (measured on the first multi-arch
+# steve-3.14.1). The label is the one source; the index repeats it.
+run 'the published index carries the platform manifests'"'"' description as its annotation' \
+  jq -r '.annotations["org.opencontainers.image.description"]' "${FAKE_REGISTRY}/v2/juherr/steve/manifests/steve-1.0.1"
+expect_status 0 && expect_out 'SteVe OCPP Central System, compiled at build time from an unmodified upstream release tag.' && pass
+
 # --- publish-index.sh: refusals -------------------------------------------
 
 reset_log
@@ -86,6 +94,13 @@ reset_log
 run 'a digest missing a required label is refused' \
   env EXPECTED_REVISION="${revision}" "${publish}" steve-1.0.1 sha256:pub-nodoc-amd64 sha256:pub-arm64
 expect_status 1 && expect_err 'org.opencontainers.image.documentation' && expect_untouched && pass
+
+# One description on the index means one on both manifests; two Dockerfiles
+# is not a release this script makes.
+reset_log
+run 'a pair that disagrees on the description is refused' \
+  env EXPECTED_REVISION="${revision}" "${publish}" steve-1.0.1 sha256:pub-amd64 sha256:pub-otherdesc-arm64
+expect_status 1 && expect_err 'org.opencontainers.image.description' && expect_err 'differs' && expect_untouched && pass
 
 reset_log
 run 'an unknown digest is refused' \
