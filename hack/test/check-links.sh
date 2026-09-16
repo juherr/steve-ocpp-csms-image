@@ -149,7 +149,10 @@ expect_status 2 && expect_err 'nothing to check' && pass
 workflow="${HACK_DIR}/../.github/workflows/check-links.yml"
 mkdir -p "${repo}/hack"
 ln -s "${HACK_DIR}/lint.sh" "${repo}/hack/lint.sh"
-printf '#!/usr/bin/env bash\nexit "${STANDIN_STATUS}"\n' >"${repo}/hack/check-links.sh"
+cat >"${repo}/hack/check-links.sh" <<'EOT'
+#!/usr/bin/env bash
+exit "${STANDIN_STATUS}"
+EOT
 chmod +x "${repo}/hack/check-links.sh"
 
 run 'the workflow step: a clean tree is a green run with no warning' \

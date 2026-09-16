@@ -36,7 +36,7 @@ this repository — if something must change in SteVe, it changes upstream.
 | `hack/renovate-extract-check.sh` | Is every pin one Renovate extracts — the `# renovate:` comments, the Markdown examples and the example manifests; run by `lint.yml`, runnable by hand |
 | `hack/lint.sh` | The steps of `lint.yml`, run locally — read out of the workflow, pins and commands, not copied from it |
 | `hack/check-links.sh` | lychee over every tracked Markdown file and `NOTICE`; what `check-links.yml` runs, runnable by hand |
-| `hack/test/` | Offline tests of the six scripts above that read the registry, against a fixture registry served by a `curl` shim and a `docker` that records instead of acting, of the Renovate check against a saved extraction, of the README's `MaxRAMPercentage` against `entrypoint.sh`, of `hack/lint.sh` against a fixture workflow, and of `hack/check-links.sh` against a `docker` shim that replays lychee's exit codes |
+| `hack/test/` | Offline tests of the six scripts above that read the registry, against a fixture registry served by a `curl` shim and a `docker` that records instead of acting, of the Renovate check against a saved extraction, of the README's `MaxRAMPercentage` against `entrypoint.sh`, of `hack/lint.sh` against a fixture workflow, and of `hack/check-links.sh` against a `docker` shim that replays lychee's exit codes — plus the step of `check-links.yml` that maps them to a verdict, run as written through `hack/lint.sh` |
 | `README.md` | User-facing documentation |
 | `examples/kubernetes/` | Reference `Deployment` + `Service` and their README — an example, not a chart; schema-checked by kubeconform in `lint.yml`, brought up in kind by `hack/k8s-example-test.sh` on every build |
 | `.github/assets/` | Images referenced by `README.md`; outside the build context |
@@ -279,8 +279,10 @@ runtime number the documentation quotes — and `lint-script.sh` for
 `hack/lint.sh`, against a fixture workflow whose steps only echo, and
 `check-links.sh` for `hack/check-links.sh`, against a `docker` shim that
 records what lychee is handed and replays its exit codes — which files, which
-image, where the report goes, and that a lychee that could not run is neither
-a clean tree nor a broken link. The second
+image, mounted where, where the report goes, and that a lychee that could not
+run is neither a clean tree nor a broken link — and, through `hack/lint.sh`
+pointed at the real `check-links.yml`, the workflow step that turns those
+codes into a verdict. The second
 suite is the only recurring
 coverage of the publish path, which no pull request exercises: a `docker`
 shim records every `imagetools create -t`, and the suite proves that a

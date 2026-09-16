@@ -106,9 +106,9 @@ jobs:
   # hack/lint.sh, which runs this file's steps locally by reading them out of
   # it — its suite includes parsing this very file, so a step written in a
   # shape it cannot read is red here, not silently skipped on a laptop. And
-  # hack/check-links.sh against a docker shim: lychee itself needs the
-  # network and runs weekly, its wrapper's handling of what lychee returns
-  # does not.
+  # hack/check-links.sh against a docker shim, and check-links.yml's own
+  # step through hack/lint.sh: lychee itself needs the network and runs
+  # weekly, the handling of what it returns does not.
   hack-tests:
     name: Registry readers & release scripts (fixtures)
     runs-on: ubuntu-latest
