@@ -67,8 +67,10 @@ run 'invoked relatively from a subdirectory, the tree is still the repository' \
   bash -c 'cd hack && ./renovate-extract-check.sh'
 expect_status 0 && expect_out 'README.md: 2 of 2' && pass
 
+# RENOVATE_IMAGE too: lint.yml exports it to every job, this suite's included,
+# and the environment's pin would stand in for the tree's (measured, in CI).
 run 'the image pin is read from the workflow of the tree under check' \
-  env -u RENOVATE_EXTRACT bash -c 'cd hack && ./renovate-extract-check.sh'
+  env -u RENOVATE_EXTRACT -u RENOVATE_IMAGE bash -c 'cd hack && ./renovate-extract-check.sh'
 expect_status 2 && expect_err 'unhandled invocation: docker run' && expect_err 'renovate/renovate:1.0.0 --platform=local --dry-run=extract' && pass
 
 # --- a docs literal Renovate no longer extracts ---------------------------
