@@ -105,7 +105,10 @@ jobs:
   # runtime value the README quotes from entrypoint.sh, compared to it, and
   # hack/lint.sh, which runs this file's steps locally by reading them out of
   # it — its suite includes parsing this very file, so a step written in a
-  # shape it cannot read is red here, not silently skipped on a laptop.
+  # shape it cannot read is red here, not silently skipped on a laptop. And
+  # hack/check-links.sh against a docker shim, and check-links.yml's own
+  # step through hack/lint.sh: lychee itself needs the network and runs
+  # weekly, the handling of what it returns does not.
   hack-tests:
     name: Registry readers & release scripts (fixtures)
     runs-on: ubuntu-latest
@@ -119,6 +122,7 @@ jobs:
       - run: ./hack/test/renovate-extract.sh
       - run: ./hack/test/readme-entrypoint.sh
       - run: ./hack/test/lint-script.sh
+      - run: ./hack/test/check-links.sh
 
   # renovate.json is load-bearing — three regex managers, and a broken one
   # freezes pins silently — and nothing else reads it before Renovate does.
