@@ -20,7 +20,7 @@ this repository — if something must change in SteVe, it changes upstream.
 | `entrypoint.sh` | Runs Flyway migrations against the runtime database, then starts the `.war` |
 | `flyway-callbacks/afterConnect.sql` | Forces `default_storage_engine=InnoDB`; replaces `-initSql`, removed in Flyway 13 |
 | `.github/workflows/build-image.yml` | One native build and probe per architecture, merged into an index on `release` — see its `on:` block for the triggers |
-| `.github/workflows/lint.yml` | hadolint / `docker build --check` / shellcheck / actionlint / zizmor, the three suites under `hack/test/`, `renovate-config-validator` and `hack/renovate-extract-check.sh` |
+| `.github/workflows/lint.yml` | hadolint / `docker build --check` / shellcheck / actionlint / zizmor, the four suites under `hack/test/`, `renovate-config-validator` and `hack/renovate-extract-check.sh` |
 | `.github/workflows/scan-published.yml` | Weekly Trivy scan of the tags already on GHCR, one job per image `hack/scan-targets.sh` lists |
 | `.github/workflows/release.yml` | The release, from the Actions tab: preflight, fast-forward `release`, start the build |
 | `.github/workflows/release-drift.yml` | Schedules `hack/release-drift.sh` — see that script for what it compares |
@@ -32,7 +32,7 @@ this repository — if something must change in SteVe, it changes upstream.
 | `hack/check-pushed-digest.sh` | Is the digest a build job pushed the image it probed; run by each build job on `release` |
 | `hack/publish-index.sh` | Checks the two platform digests and the index they would form, then makes the tag and prints the digest to pin; run by the `publish` job on `release` |
 | `hack/renovate-extract-check.sh` | Is every pin one Renovate extracts — the `# renovate:` comments and the Markdown examples; run by `lint.yml`, runnable by hand |
-| `hack/test/` | Offline tests of the six scripts above that read the registry, against a fixture registry served by a `curl` shim and a `docker` that records instead of acting, and of the Renovate check against a saved extraction |
+| `hack/test/` | Offline tests of the six scripts above that read the registry, against a fixture registry served by a `curl` shim and a `docker` that records instead of acting, of the Renovate check against a saved extraction, and of the README's `MaxRAMPercentage` against `entrypoint.sh` |
 | `README.md` | User-facing documentation |
 | `.github/assets/` | Images referenced by `README.md`; outside the build context |
 | `NOTICE` | License aggregation of the produced image — must stay accurate |
@@ -240,12 +240,14 @@ gates, offline: a finding fails the pull request, and a waiver is a comment
 on the line that earned it, with its reason, as the `# hadolint ignore=`
 ones are. Every checkout sets `persist-credentials: false` except the one in
 `release.yml`, which says why it keeps them. Then the
-three suites under `hack/test/`, which are the whole test suite, no network:
+four suites under `hack/test/`, which are the whole test suite, no network:
 `registry-readers.sh` for `image-config.sh`, the two release readers and
 `scan-targets.sh`, `release-publish.sh` for the two scripts that run only on
 `release` — `check-pushed-digest.sh` in each build job and `publish-index.sh`
-in the `publish` job — and `renovate-extract.sh` for the Renovate check
-below, against a saved extraction. The second suite is the only recurring
+in the `publish` job — `renovate-extract.sh` for the Renovate check below,
+against a saved extraction, and `readme-entrypoint.sh`, which holds the
+README's `-XX:MaxRAMPercentage` to the value `entrypoint.sh` sets — the one
+runtime number the documentation quotes. The second suite is the only recurring
 coverage of the publish path, which no pull request exercises: a `docker`
 shim records every `imagetools create -t`, and the suite proves that a
 candidate failing a check never reaches one. A change to any of those seven

@@ -58,7 +58,9 @@ An index tag has three digests, and only one of them is the one to pin: the
 prints as "Digest to pin". The two under `Manifests:` are the platform images
 the index points at; pinning one of those pins one architecture, and a host
 of the other one still pulls it — with a platform-mismatch warning — and then
-runs it only if it can emulate it.
+runs it only if it can emulate it. The output below is the shape a tag from
+the multi-architecture build has; on a tag from before it, the same command
+prints one manifest and no `Manifests:` list.
 
 ```bash
 docker buildx imagetools inspect ghcr.io/juherr/steve:steve-3.14.1
@@ -235,6 +237,88 @@ over WebSocket without an interactive login, so they cannot pass an
 authentication proxy. If you expose the UI publicly behind a reverse proxy,
 route only the UI hostname and keep the OCPP endpoint off the public interface —
 for example by publishing it on a VPN address only.
+
+## Deploying on a NAS or a small board
+
+What makes upstream's Compose setup heavy on a NAS or a single-board computer
+is the `mvnw clean package` in its `CMD`: Maven, the dependency downloads it
+makes — through whatever proxy the box sits behind — and a JDK to run them, on
+every start (upstream
+[#1919](https://github.com/steve-community/steve/issues/1919),
+[#777](https://github.com/steve-community/steve/issues/777),
+[#1094](https://github.com/steve-community/steve/issues/1094),
+[#909](https://github.com/steve-community/steve/issues/909)). None of that
+happens here. The `.war`, the JRE and the Flyway scripts are in the image;
+**nothing is compiled or downloaded when the container starts**, and the only
+thing the entrypoint reaches is the database — see *Why this image exists*.
+Synology Container Manager, QNAP Container Station and Portainer deploy a
+Compose file, and the one under *Usage* is meant for them too; what may need
+adapting is the bind mount's host side. `./data/mariadb` is relative to the
+Compose file, and a stack pasted into a web editor has no directory of its
+own for it to be relative to — give it an absolute path on the volume you
+mean. Not verified on each product; there are no vendor-specific steps in
+this document.
+
+**Platform.** A tag from before the multi-architecture build is
+`linux/amd64` alone, and at the time of writing that is every tag published,
+`steve-3.14.1` included: an ARM NAS or a Raspberry Pi does not run those
+natively, only under emulation where the host offers one, and that is not a
+supported setup. Native `linux/arm64` arrives with the first tag the
+multi-architecture build publishes, an index holding both platforms — the
+shape *Tags* shows. `docker buildx imagetools inspect` there tells which of
+the two a given tag is. Either way the host needs a 64-bit OS.
+
+**Restart policy.** `restart: unless-stopped`, as in the Compose file above:
+the stack comes back after a host reboot, and a container stopped on purpose
+with `docker compose stop` stays down until started again. (Docker's
+documented semantics for the policy; not re-measured here.)
+
+**What to persist and back up.** The application container is disposable:
+running, it writes nothing outside `/tmp` — a jar cache, the JVM's perf data
+and Jetty's compiled JSPs, per `docker diff` on `steve-3.14.1`. All state is
+the MariaDB data directory, bind-mounted from `./data/mariadb`, so put that
+path on the volume the NAS backs up. A filesystem snapshot of a running data
+directory is not a consistent backup; the dump under *Upgrading*, step 1, is
+— schedule it (the NAS task scheduler, or `cron`) and keep the dumps
+somewhere other than the disk holding `./data/mariadb`.
+
+**Memory.** The entrypoint starts the JVM with `-XX:MaxRAMPercentage=85`, so
+the *heap* is sized from the container's memory limit — and, with no limit,
+from the whole machine: 6.5 GiB of heap allowed on a 7.65 GiB host
+(measured), shared with MariaDB and everything else the NAS runs. Set a limit
+on the `steve` service. The heap is not the whole process: metaspace, thread
+stacks and the JVM's own native memory sit on top of it, and the container
+limit has to hold all of that — once the heap has grown to its cap, the
+non-heap has only what the heap leaves of the limit to fit in. MariaDB sizes
+itself independently and is left alone here.
+
+```yaml
+  steve:
+    mem_limit: 1g   # the heap may grow to 85 % of this; the rest is non-heap
+```
+
+`1g` is an observed working value, not a sizing recommendation. Measured on
+`steve-3.14.1` idle, no charge point connected — the amd64 image, emulated
+on Apple Silicon: the heap arithmetic is the same on any host, the resident
+figures are indicative — the container settles at about 525 MiB under `1g`.
+Under `512m` it still migrates an empty database and becomes healthy, but
+sits at about 490 MiB of its 512, heap capped at 436 MiB, with nothing to
+spare. What your charge points add is yours to measure; `docker stats` reads
+it. No CPU figure is given: none was measured.
+
+**TLS.** Terminate it at a reverse proxy rather than inside SteVe, and keep
+the two kinds of client apart, as the *Security note* says. For the
+management UI: a proxy holding the certificate, forwarding to the container's
+`8180` — published on `127.0.0.1` when the proxy is on the same host, see
+*Networking* — and routing only the UI hostname, so that nothing on the
+public side reaches the OCPP endpoint. For the charge points: a private path,
+never the public proxy. Plain `ws://` straight to `8180`, published on that
+interface alone (`"192.168.1.10:8180:8180"`, as *Networking* shows), is
+cleartext — identifiers, RFID tags and meter values readable by anything on
+that network — so it belongs on a network you hold end to end, a VPN or a
+LAN nothing else is on. Anywhere else, `wss://`: a listener of the proxy on
+that private address holds the certificate for the charge points, and it must
+pass WebSocket upgrades through, or they cannot connect.
 
 ## Upgrading
 
