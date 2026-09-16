@@ -6,7 +6,11 @@
 # image that no longer exists. Read both and compare — no fixtures, no
 # network. Both shapes the README uses are matched, `MaxRAMPercentage=<n>`
 # and `<n> % of`, and a README that mentions neither is a failure too:
-# a rewrite that drops the number must not pass as "consistent".
+# a rewrite that drops the number must not pass as "consistent". The flag is
+# a JVM double — `82.5` is a legal value — so the whole number is compared,
+# decimals included: matching digits up to the point would let `82.5` at
+# runtime pass against `82` in the README, the very drift this test exists
+# to catch.
 #
 # Usage:  ./hack/test/readme-entrypoint.sh
 # Exit:   0 consistent · 1 otherwise
@@ -19,13 +23,13 @@ entrypoint="${root}/entrypoint.sh"
 readme="${root}/README.md"
 
 # Only one JVM line sets the value; two would be two answers.
-set_in_entrypoint=$(sed -n 's/.*-XX:MaxRAMPercentage=\([0-9][0-9]*\).*/\1/p' "${entrypoint}")
+set_in_entrypoint=$(sed -n 's/.*-XX:MaxRAMPercentage=\([0-9][0-9]*\(\.[0-9][0-9]*\)\{0,1\}\).*/\1/p' "${entrypoint}")
 case "${set_in_entrypoint}" in
   '')  echo "FAIL entrypoint.sh sets no -XX:MaxRAMPercentage" >&2; exit 1 ;;
   *$'\n'*) echo "FAIL entrypoint.sh sets -XX:MaxRAMPercentage more than once" >&2; exit 1 ;;
 esac
 
-documented=$(grep -oE 'MaxRAMPercentage=[0-9]+|[0-9]+ % of' "${readme}" | grep -oE '[0-9]+' || true)
+documented=$(grep -oE 'MaxRAMPercentage=[0-9]+(\.[0-9]+)?|[0-9]+(\.[0-9]+)? % of' "${readme}" | grep -oE '[0-9]+(\.[0-9]+)?' || true)
 if [ -z "${documented}" ]; then
   echo "FAIL README.md no longer states MaxRAMPercentage; the test matches nothing" >&2
   exit 1
