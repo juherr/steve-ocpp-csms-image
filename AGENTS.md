@@ -20,7 +20,7 @@ this repository — if something must change in SteVe, it changes upstream.
 | `entrypoint.sh` | Runs Flyway migrations against the runtime database, then starts the `.war` |
 | `flyway-callbacks/afterConnect.sql` | Forces `default_storage_engine=InnoDB`; replaces `-initSql`, removed in Flyway 13 |
 | `.github/workflows/build-image.yml` | One native build and probe per architecture, merged into an index on `release` — see its `on:` block for the triggers |
-| `.github/workflows/lint.yml` | hadolint / shellcheck / actionlint, the three suites under `hack/test/`, and `hack/renovate-extract-check.sh` |
+| `.github/workflows/lint.yml` | hadolint / `docker build --check` / shellcheck / actionlint / zizmor, the three suites under `hack/test/`, `renovate-config-validator` and `hack/renovate-extract-check.sh` |
 | `.github/workflows/scan-published.yml` | Weekly Trivy scan of the tags already on GHCR, one job per image `hack/scan-targets.sh` lists |
 | `.github/workflows/release.yml` | The release, from the Actions tab: preflight, fast-forward `release`, start the build |
 | `.github/workflows/release-drift.yml` | Schedules `hack/release-drift.sh` — see that script for what it compares |
@@ -231,9 +231,15 @@ differed. Two habits close it: run scripts through their shebang rather than
 pasting their contents (`./hack/release-drift.sh`, not a copy of its body), and
 prefer arrays to space-separated strings when a command takes a path list.
 
-The linters are the cheap gate. Run the three steps of
+The linters are the cheap gate. Run the steps of the `lint` job in
 `.github/workflows/lint.yml` — that file pins the images, so copying the
-commands here would only create a second version to keep in sync — and the
+commands here would only create a second version to keep in sync. zizmor is
+the one that reads the workflows for what actionlint does not — pins,
+permissions, template injection, checkouts that keep the token — and it
+gates, offline: a finding fails the pull request, and a waiver is a comment
+on the line that earned it, with its reason, as the `# hadolint ignore=`
+ones are. Every checkout sets `persist-credentials: false` except the one in
+`release.yml`, which says why it keeps them. Then the
 three suites under `hack/test/`, which are the whole test suite, no network:
 `registry-readers.sh` for `image-config.sh`, the two release readers and
 `scan-targets.sh`, `release-publish.sh` for the two scripts that run only on
@@ -249,7 +255,12 @@ export itself — it needs buildx and a registry, and rests on the #27 spike
 and a local `registry:2` run.
 
 A change to a pin — or to a file holding one — is proven by making Renovate say
-so, not by reading `renovate.json`. `hack/renovate-extract-check.sh` runs
+so, not by reading `renovate.json`. The file itself goes through
+`renovate-config-validator --strict` first, from the same pinned image: a
+regex that does not compile or a deprecated option fails there (the
+`--strict` is what turns the latter from a warning into a failure, measured),
+while a misspelled preset does not — presets are resolved online, at run
+time. Then `hack/renovate-extract-check.sh` runs
 Renovate's own image on the working directory — `--platform=local
 --dry-run=extract` stops after the extraction phase: no datasource queried,
 no branch, no PR, nothing written — and fails when a `# renovate:` comment is

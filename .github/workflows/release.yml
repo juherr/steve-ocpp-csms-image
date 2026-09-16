@@ -68,6 +68,12 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
+          # The fast-forward below pushes with these credentials — the one
+          # checkout in this repository that keeps them. Spelled out rather than
+          # left to the default: zizmor reads an explicit `true` as intended and
+          # says nothing, where the default is an `artipacked` finding (measured,
+          # under `--persona pedantic` too).
+          persist-credentials: true
 
       # Would this publish anything, or only move a digest? The reasoning lives
       # in the script, which is runnable by hand for the same reason the drift

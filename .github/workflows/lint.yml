@@ -7,6 +7,8 @@
 #
 # The linters run from their own pinned images instead of third-party actions:
 # one less thing to pin by SHA, and the exact command below is runnable locally.
+# The two that do not are shellcheck and `docker build --check`, which are the
+# runner's own.
 
 name: Lint
 
@@ -30,6 +32,8 @@ env:
   ACTIONLINT_IMAGE: "rhysd/actionlint:1.7.12"
   # renovate: datasource=docker depName=renovate/renovate
   RENOVATE_IMAGE: "renovate/renovate:44.93.6"
+  # renovate: datasource=docker depName=ghcr.io/zizmorcore/zizmor
+  ZIZMOR_IMAGE: "ghcr.io/zizmorcore/zizmor:1.30.1"
 
 jobs:
   lint:
@@ -38,6 +42,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
 
       # Every linter below discovers its own inputs, so a second Dockerfile or a
       # second script cannot be added without being checked. The rules waived
@@ -48,6 +54,15 @@ jobs:
           git ls-files '*Dockerfile*' \
             | xargs -r docker run --rm -v "${PWD}:/repo" -w /repo "${HADOLINT_IMAGE}" hadolint
 
+      # BuildKit's own rule set, the one a build prints as warnings, without the
+      # build: it stops after resolving the `FROM` lines — one registry call
+      # for their metadata, no layer pulled, no MariaDB — and exits non-zero on
+      # a warning (measured). Nothing to pin, it is the runner's Docker.
+      - name: docker build --check (Dockerfiles)
+        run: |
+          git ls-files '*Dockerfile*' \
+            | xargs -r -I{} docker build --check -f {} .
+
       # shellcheck ships with the GitHub-hosted runner image.
       - name: shellcheck (shell scripts)
         run: git ls-files '*.sh' | xargs -r shellcheck
@@ -55,6 +70,20 @@ jobs:
       - name: actionlint (workflows)
         run: |
           docker run --rm -v "${PWD}:/repo" -w /repo "${ACTIONLINT_IMAGE}" -color
+
+      # What actionlint does not look at: unpinned actions, permissions broader
+      # than the job that needs them, expressions interpolated into a script,
+      # and checkouts that leave the token in .git/config for the rest of the
+      # job — the invariants AGENTS.md spells out. A finding is a failed step,
+      # and a waiver is a comment on the line that earned it, with its reason,
+      # like the hadolint ones. --offline: no network call in a pull-request
+      # gate, which leaves out the audits that ask GitHub (known-vulnerable-
+      # actions, impostor-commit, ref-confusion); the SHA pins are Renovate's
+      # to move. The whole tree, not .github/workflows: a composite action
+      # added later is found on arrival.
+      - name: zizmor (workflows)
+        run: |
+          docker run --rm -v "${PWD}:/repo" -w /repo "${ZIZMOR_IMAGE}" --offline .
 
   # The registry readers and the release-only scripts, against fixtures rather
   # than GHCR: the multi-arch shapes the readers must handle are not published
@@ -66,18 +95,34 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - run: ./hack/test/registry-readers.sh
       - run: ./hack/test/release-publish.sh
       - run: ./hack/test/renovate-extract.sh
 
-  # Every pin is one Renovate extracts — the `# renovate:` comments and the
-  # SteVe tag examples in the Markdown files, which have no comment to hang
-  # off and would otherwise freeze silently the day a README edit leaves
-  # their shape. Extraction only: no datasource, no branch, nothing written.
+  # renovate.json is load-bearing — three regex managers, and a broken one
+  # freezes pins silently — and nothing else reads it before Renovate does.
+  # First the file itself, with Renovate's own validator, from the image the
+  # extraction below pulls anyway (a second in that job, measured). --strict:
+  # without it a deprecated option is a warning and the step is green
+  # (measured on `regexManagers`). What it cannot see offline is a preset
+  # name: `config:recomended` validates (measured) — presets are resolved
+  # against github.com, at run time. Then every pin is one Renovate extracts —
+  # the `# renovate:` comments and the SteVe tag examples in the Markdown
+  # files, which have no comment to hang off and would otherwise freeze
+  # silently the day a README edit leaves their shape. Extraction only: no
+  # datasource, no branch, nothing written.
   renovate-extract:
-    name: Pins are extracted by Renovate
+    name: renovate.json validates and every pin is extracted
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      # No file argument: given one, the validator reads it as *global* config
+      # (the bot's own), not as a repository's (measured).
+      - run: |
+          docker run --rm -v "${PWD}:/repo" -w /repo "${RENOVATE_IMAGE}" renovate-config-validator --strict
       - run: ./hack/renovate-extract-check.sh

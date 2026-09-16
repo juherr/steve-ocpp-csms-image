@@ -44,8 +44,8 @@ release as second argument — on a schema that release wrote. So:
   Maven cost entirely.
 
 The rule extends to claims *about the tools themselves*. Comments and
-documentation here assert how hadolint, Trivy, Renovate, BuildKit or GHCR
-behave, and those assertions get believed and built on. Run the thing before
+documentation here assert how hadolint, zizmor, Trivy, Renovate, BuildKit or
+GHCR behave, and those assertions get believed and built on. Run the thing before
 writing the sentence. Two comments in this repository were written from
 plausible reasoning and turned out false when measured — one claiming Trivy's
 secret scanner reads deleted layers, one describing the build as avoiding
