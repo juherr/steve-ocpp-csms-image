@@ -3,6 +3,16 @@
   "extends": [
     "config:recommended"
   ],
+  "description": "ignorePaths is the list `config:recommended` brings in through `:ignoreModulesAndTests`, minus `**/examples/**`: the Kubernetes example manifests under examples/ carry the SteVe tag and must be extracted, which the preset silently prevented (measured by hack/renovate-extract-check.sh). `**/test/**` stays, so the fixtures under hack/test/ are not read as pins",
+  "ignorePaths": [
+    "**/node_modules/**",
+    "**/bower_components/**",
+    "**/vendor/**",
+    "**/__tests__/**",
+    "**/test/**",
+    "**/tests/**",
+    "**/__fixtures__/**"
+  ],
   "labels": [
     "dependencies"
   ],
@@ -46,9 +56,10 @@
     },
     {
       "customType": "regex",
-      "description": "SteVe release tag in the Markdown documentation — same depName as the Dockerfile pin, so the examples move in the same PR instead of freezing silently. Prose has no adjacent `# renovate:` comment to read, hence the templates; every .md file, so a document added later is managed on arrival",
+      "description": "SteVe release tag in the Markdown documentation and in the Kubernetes example manifests — same depName as the Dockerfile pin, so the examples move in the same PR instead of freezing silently. Prose has no adjacent `# renovate:` comment to read, hence the templates; every .md file and every YAML under examples/, so a document or manifest added later is managed on arrival",
       "managerFilePatterns": [
-        "/\\.md$/"
+        "/\\.md$/",
+        "/^examples/.+\\.ya?ml$/"
       ],
       "matchStrings": [
         "(?:ghcr\\.io/juherr/steve:|STEVE_REF=|manifests/)(?<currentValue>steve-\\d+\\.\\d+\\.\\d+)"

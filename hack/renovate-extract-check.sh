@@ -6,9 +6,10 @@
 # extraction says whether it is. This runs that extraction — `--platform=local
 # --dry-run=extract`, no datasource queried, nothing written — and compares it
 # with the tree: every `# renovate:` comment in a tracked file must be inside
-# a replaceString of that file, and every Markdown file must yield as many
-# SteVe-tag dependencies as it has literals in the shapes renovate.json
-# declares. The shapes are read from renovate.json, not copied here.
+# a replaceString of that file, and every documentation file — Markdown, and
+# the Kubernetes example manifests — must yield as many SteVe-tag dependencies
+# as it has literals in the shapes renovate.json declares. The shapes and the
+# files they apply to are read from renovate.json, not copied here.
 #
 # Usage:  ./hack/renovate-extract-check.sh    (from anywhere in the repository)
 # Env:    RENOVATE_IMAGE    the Renovate image to run; defaults to the pin in
