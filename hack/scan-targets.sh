@@ -5,17 +5,19 @@
 #
 # Given an image index, `trivy image` scans the platform matching the runner —
 # linux/amd64 — and never looks at the other, so the workflow scans each
-# platform as its own matrix job, with `--platform`. Which platforms is asked
-# to the registry rather than fixed to the two the build produces, because
-# Trivy given `--platform linux/arm64` on a single amd64 manifest — every tag
-# published before the image went multi-arch — does not fail: it ignores the
-# option and scans the amd64 image (measured, 0.74.0). A fixed pair would file
-# those findings under an `-arm64` category. So a tag is probed for the
-# platforms the build produces, amd64 and arm64, through the same test the
-# build workflow makes before its upgrade scenario: ask hack/image-config.sh
-# for that architecture and keep the pair only when the answer is the one
-# asked for — on a single manifest, and on an index lacking that platform,
-# the helper answers with what the tag does carry.
+# platform as its own matrix job, with `--platform`. The candidates are the
+# two platforms the build produces, amd64 and arm64, and nothing else is
+# looked for; but rather than assuming a tag carries both, the registry is
+# probed for each, because Trivy given `--platform linux/arm64` on a single
+# amd64 manifest — every tag published before the image went multi-arch —
+# does not fail: it ignores the option and scans the amd64 image (measured,
+# 0.74.0). Assuming both would file those findings under an `-arm64`
+# category. The probe is the same test the build workflow makes before its
+# upgrade scenario: ask hack/image-config.sh for that architecture and keep
+# the pair only when the answer is the one asked for — on a single manifest,
+# and on an index lacking that platform, the helper answers with what the tag
+# does carry. A third architecture added to the build has to be added to the
+# candidates below as well, or it ships unscanned.
 #
 # Only the three most recent releases, and only steve-X.Y.Z tags: an immutable
 # old tag's CVE list only ever grows and the answer for whoever pinned it is
