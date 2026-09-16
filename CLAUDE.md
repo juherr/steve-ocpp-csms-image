@@ -13,9 +13,10 @@ descriptions — in English.
 
 ## Verification has a real cost here
 
-The unit tests are the three suites under `hack/test/`, and they cover the
+The unit tests are the four suites under `hack/test/`, and they cover the
 scripts that read the registry — including the two that run only on
-`release` — and the Renovate check, alone, offline, against fixtures. For
+`release` — the Renovate check, and the README's `MaxRAMPercentage` against
+`entrypoint.sh`, alone, offline — against fixtures for the first three. For
 the image itself the meaningful checks are a full build, which clones SteVe
 and runs Maven against a live MariaDB (~2 min on CI, once per architecture,
 longer locally), and
