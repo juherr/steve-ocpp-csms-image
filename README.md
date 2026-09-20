@@ -7,6 +7,10 @@ the open-source OCPP Central System (CSMS).
 ghcr.io/juherr/steve
 ```
 
+GHCR is the canonical registry. Docker Hub is an official mirror of the
+images published by this project: `juherr/steve` there carries the same
+tags, and each is the same image — see *Usage*.
+
 Unofficial and community-maintained. Not affiliated with the SteVe project.
 
 ## Why this image exists
@@ -85,6 +89,11 @@ Manifests:
 image: ghcr.io/juherr/steve:steve-3.14.1@sha256:<index digest>
 ```
 
+The Docker Hub mirror holds that same index, copied by digest rather than
+rebuilt, so `imagetools inspect` prints the same three digests for
+`juherr/steve:steve-3.14.1` and the digest you pin is the one string on
+both registries.
+
 The exact JRE of an image you already hold is readable from it:
 
 ```bash
@@ -94,11 +103,19 @@ docker run --rm --entrypoint java ghcr.io/juherr/steve:steve-3.14.1 -version
 ## Usage
 
 ```bash
+# GitHub Container Registry — canonical
 docker pull ghcr.io/juherr/steve:steve-3.14.1
+
+# Docker Hub — official mirror of the same image
+docker pull juherr/steve:steve-3.14.1
 ```
 
-This fetches the platform of the host; `--platform linux/arm64` (or `amd64`)
-fetches the other one on purpose, to inspect it for instance.
+GHCR is the canonical registry. Docker Hub is an official mirror of the
+images published by this project: every release is copied there as it is,
+index and platform manifests, and read back before the release is called
+done. Either fetches the platform of the host; `--platform linux/arm64` (or
+`amd64`) fetches the other one on purpose, to inspect it for instance. The
+examples below name GHCR; the Docker Hub name works in every one of them.
 
 Minimal Compose setup:
 
@@ -560,6 +577,19 @@ with the two platform digests beside it in the run's summary. The version
 built is whatever `ARG STEVE_REF` says in the `Dockerfile` on that commit —
 the single place the release is pinned in code, which is why the workflow asks
 for no version.
+
+A last job then mirrors the tag to Docker Hub: `hack/mirror-tag.sh` copies
+the index GHCR now holds, by digest and with
+[crane](https://github.com/google/go-containerregistry/blob/main/cmd/crane/README.md),
+to `docker.io/juherr/steve`, and reads it back — same index digest, same
+platform digests — before the run is green. Nothing is rebuilt for it. A
+Docker Hub outage fails that job alone; *Re-run failed jobs* copies again,
+without a build. The same script runs by hand, with a Docker Hub access
+token of your own, against any tag the multi-architecture build published:
+
+```bash
+DOCKERHUB_USERNAME=<user> DOCKERHUB_TOKEN=<token> ./hack/mirror-tag.sh steve-3.14.1
+```
 
 The workflow adds one check the bare push cannot make: it refuses when the tag
 is already published *and* the packaging has not changed since, because that

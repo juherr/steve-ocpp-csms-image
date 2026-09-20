@@ -109,4 +109,16 @@ step=$(printf '%s\n' "${out}" | sed -n '/^==> lint \/ shellcheck /,/^==>/p')
 expect_step() { [[ "${step}" == *"$1"* ]] || { fail "shellcheck step lacks '$1'"; return 1; }; }
 expect_status 0 && expect_step 'docker run' && expect_step '${SHELLCHECK_IMAGE}' && pass
 
+# --- the real workflow runs the crane pin build-image.yml holds ------------
+
+# The mirror suite shims `docker`, and the `mirror` job runs only on
+# `release`: without this step a digest that does not pull, or a container
+# that no longer runs, would be found after GHCR has already been published.
+# The step must read the pin out of build-image.yml rather than repeat it.
+run "the real lint.yml runs the crane image build-image.yml pins" \
+  "${script}" -n lint
+step=$(printf '%s\n' "${out}" | sed -n '/^==> lint \/ crane /,/^==>/p')
+expect_step() { [[ "${step}" == *"$1"* ]] || { fail "crane step lacks '$1'"; return 1; }; }
+expect_status 0 && expect_step 'docker run' && expect_step 'CRANE_IMAGE' && expect_step 'build-image.yml' && expect_step ' version' && pass
+
 exit "${failed}"

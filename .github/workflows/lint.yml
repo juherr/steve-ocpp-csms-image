@@ -111,10 +111,24 @@ jobs:
           git ls-files 'examples/kubernetes/*.yaml' 'examples/kubernetes/*.yml' \
             | xargs -r docker run --rm -v "${PWD}:/repo" -w /repo "${KUBECONFORM_IMAGE}" -strict -summary
 
+      # The one image a pull request never otherwise runs: crane, which the
+      # `mirror` job hands the Docker Hub token on `release`, and which the
+      # mirror suite replaces with a shim. Pulled by the exact tag@digest
+      # build-image.yml pins — read from there, not repeated — and asked its
+      # version: a digest that does not pull, or a container that no longer
+      # runs, is red here rather than after GHCR has been published. It is
+      # also what proves a Renovate move of that pin before it lands.
+      - name: crane (the image the mirror job runs)
+        run: |
+          image=$(sed -n 's/^  CRANE_IMAGE: "\(.*\)"$/\1/p' .github/workflows/build-image.yml)
+          [ -n "${image}" ] || { echo "no CRANE_IMAGE pin in build-image.yml"; exit 1; }
+          docker run --rm "${image}" version
+
   # The registry readers and the release-only scripts, against fixtures rather
   # than GHCR: the multi-arch shapes the readers must handle are not published
   # under juherr/steve yet, and the publish path runs only on `release` — the
-  # release gate should not be the first place either is met. And the one
+  # release gate should not be the first place either is met — nor the mirror
+  # to Docker Hub, which follows it there. And the one
   # runtime value the README quotes from entrypoint.sh, compared to it, and
   # hack/lint.sh, which runs this file's steps locally by reading them out of
   # it — its suite includes parsing this very file, so a step written in a
@@ -132,6 +146,7 @@ jobs:
           persist-credentials: false
       - run: ./hack/test/registry-readers.sh
       - run: ./hack/test/release-publish.sh
+      - run: ./hack/test/mirror-tag.sh
       - run: ./hack/test/renovate-extract.sh
       - run: ./hack/test/readme-entrypoint.sh
       - run: ./hack/test/lint-script.sh

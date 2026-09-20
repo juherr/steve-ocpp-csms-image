@@ -45,24 +45,24 @@
     },
     {
       "customType": "regex",
-      "description": "Docker images referenced from a workflow env block rather than from a FROM line — every workflow, so that a linter or scanner added later is managed on arrival rather than frozen at the version it was introduced with",
+      "description": "Docker images referenced from a workflow env block rather than from a FROM line — every workflow, so that a linter or scanner added later is managed on arrival rather than frozen at the version it was introduced with. A `tag@sha256:…` pin yields its digest too, so Renovate moves both halves together (the crane image in build-image.yml)",
       "managerFilePatterns": [
         "/^\\.github/workflows/.+\\.ya?ml$/"
       ],
       "matchStrings": [
-        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\s+\\w+_IMAGE: \"[^\"\\s:]+:(?<currentValue>[^\"\\s]+)\""
+        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\s+\\w+_IMAGE: \"[^\"\\s:]+:(?<currentValue>[^\"\\s@]+)(?:@(?<currentDigest>sha256:[a-f0-9]+))?\""
       ],
       "versioningTemplate": "docker"
     },
     {
       "customType": "regex",
-      "description": "SteVe release tag in the Markdown documentation and in the Kubernetes example manifests — same depName as the Dockerfile pin, so the examples move in the same PR instead of freezing silently. Prose has no adjacent `# renovate:` comment to read, hence the templates; every .md file and every YAML under examples/, so a document or manifest added later is managed on arrival",
+      "description": "SteVe release tag in the Markdown documentation and in the Kubernetes example manifests — same depName as the Dockerfile pin, so the examples move in the same PR instead of freezing silently. Prose has no adjacent `# renovate:` comment to read, hence the templates; every .md file and every YAML under examples/, so a document or manifest added later is managed on arrival. The registry prefix is optional so that the Docker Hub form `juherr/steve:` is read too; `ghcr.io/juherr/steve:` cannot be counted twice, the earlier match consumes the tag",
       "managerFilePatterns": [
         "/\\.md$/",
         "/^examples/.+\\.ya?ml$/"
       ],
       "matchStrings": [
-        "(?:ghcr\\.io/juherr/steve:|STEVE_REF=|manifests/)(?<currentValue>steve-\\d+\\.\\d+\\.\\d+)"
+        "(?:(?:ghcr\\.io/|docker\\.io/)?juherr/steve:|STEVE_REF=|manifests/)(?<currentValue>steve-\\d+\\.\\d+\\.\\d+)"
       ],
       "datasourceTemplate": "github-releases",
       "depNameTemplate": "steve-community/steve"
