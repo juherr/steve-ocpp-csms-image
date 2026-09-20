@@ -91,7 +91,11 @@ One pin is a tag *and* a digest: `CRANE_IMAGE` in `build-image.yml`, the
 container that is handed the Docker Hub token and decides what lands there —
 the standing of the SHA-pinned actions, not of a linter. The tag stays for
 reading; `customManagers[1]` reads the digest too (`currentDigest`, measured
-by the extraction check), so Renovate moves both halves in one PR.
+by the extraction check), so Renovate moves both halves in one PR. It is
+also the one image a pull request would never run — the mirror suite shims
+`docker`, the `mirror` job waits for `release` — so `lint.yml` pulls the
+exact pin, read out of `build-image.yml`, and asks `crane version`; a
+digest that does not pull is red before anything is published.
 One pin is deliberately a major only: `RENOVATE_IMAGE` in `lint.yml`, the
 image that validates `renovate.json` and runs the extraction check. It is a
 tool of the pull request, not a component of the image, and a full pin meant
