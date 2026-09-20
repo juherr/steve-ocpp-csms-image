@@ -86,6 +86,14 @@ updates. A comment adjacent to the pin is not enough — check that
 silently freezes. `customManagers[1]` deliberately matches every workflow and
 `customManagers[2]` every Markdown file and every YAML under `examples/`, so a
 linter, scanner, document or manifest added later is managed on arrival.
+One pin is deliberately a major only: `RENOVATE_IMAGE` in `lint.yml`, the
+image that validates `renovate.json` and runs the extraction check. It is a
+tool of the pull request, not a component of the image, and a full pin meant
+a PR per Renovate patch, several a week. `44` is still managed — Renovate
+proposes `45` when it exists, and nothing below — and is not `latest`, which
+tracks no release line. The tag moves, and `docker run` does not re-pull a
+tag it already has: a runner pulls it fresh, a laptop needs
+`docker pull renovate/renovate:44` to catch up.
 
 The SteVe release is pinned in exactly one place in code: `ARG STEVE_REF` in the
 `Dockerfile`. Both the pull-request build and the release read it from there, so
