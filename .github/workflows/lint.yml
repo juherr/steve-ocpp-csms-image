@@ -33,8 +33,12 @@ env:
   KUBECONFORM_IMAGE: "ghcr.io/yannh/kubeconform:v0.8.0-alpine"
   # renovate: datasource=docker depName=koalaman/shellcheck
   SHELLCHECK_IMAGE: "koalaman/shellcheck:v0.11.0"
+  # Major only, on purpose: a validation tool, not a component of the image,
+  # and Renovate ships several patches a week — one PR each at a full pin.
+  # The major still moves through Renovate (docker versioning keeps the
+  # precision it found), and `latest` would track no release line at all.
   # renovate: datasource=docker depName=renovate/renovate
-  RENOVATE_IMAGE: "renovate/renovate:44.94.0"
+  RENOVATE_IMAGE: "renovate/renovate:44"
   # renovate: datasource=docker depName=ghcr.io/zizmorcore/zizmor
   ZIZMOR_IMAGE: "ghcr.io/zizmorcore/zizmor:1.30.1"
 
