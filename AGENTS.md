@@ -20,7 +20,7 @@ this repository — if something must change in SteVe, it changes upstream.
 | `entrypoint.sh` | Runs Flyway migrations against the runtime database, then starts the `.war` |
 | `flyway-callbacks/afterConnect.sql` | Forces `default_storage_engine=InnoDB`; replaces `-initSql`, removed in Flyway 13 |
 | `.github/workflows/build-image.yml` | One native build and probe per architecture, merged into an index on `release` — see its `on:` block for the triggers |
-| `.github/workflows/lint.yml` | hadolint / `docker build --check` / shellcheck / actionlint / zizmor / kubeconform, the six suites under `hack/test/`, `renovate-config-validator` and `hack/renovate-extract-check.sh` |
+| `.github/workflows/lint.yml` | hadolint / `docker build --check` / shellcheck / actionlint / zizmor / kubeconform, the seven suites under `hack/test/`, `renovate-config-validator` and `hack/renovate-extract-check.sh` |
 | `.github/workflows/scan-published.yml` | Weekly Trivy scan of the tags already on GHCR, one job per image `hack/scan-targets.sh` lists |
 | `.github/workflows/release.yml` | The release, from the Actions tab: preflight, fast-forward `release`, start the build |
 | `.github/workflows/release-drift.yml` | Schedules `hack/release-drift.sh` — see that script for what it compares |
@@ -33,10 +33,11 @@ this repository — if something must change in SteVe, it changes upstream.
 | `hack/scan-targets.sh` | The images `scan-published.yml` scans: one (tag, arch) per supported platform each of the newest tags carries; runnable by hand |
 | `hack/check-pushed-digest.sh` | Is the digest a build job pushed the image it probed; run by each build job on `release` |
 | `hack/publish-index.sh` | Checks the two platform digests and the index they would form, then makes the tag — the index annotated with the manifests' `description`, which is where GHCR reads a multi-arch package's description — and prints the digest to pin; run by the `publish` job on `release` |
+| `hack/mirror-tag.sh` | Copies a published tag from GHCR to Docker Hub as it is — `crane copy`, same index digest on both — and reads it back; run by the `mirror` job on `release`, runnable by hand with a Docker Hub token |
 | `hack/renovate-extract-check.sh` | Is every pin one Renovate extracts — the `# renovate:` comments, the Markdown examples and the example manifests; run by `lint.yml`, runnable by hand |
 | `hack/lint.sh` | The steps of `lint.yml`, run locally — read out of the workflow, pins and commands, not copied from it |
 | `hack/check-links.sh` | lychee over every tracked Markdown file and `NOTICE`; what `check-links.yml` runs, runnable by hand |
-| `hack/test/` | Offline tests of the six scripts above that read the registry, against a fixture registry served by a `curl` shim and a `docker` that records instead of acting, of the Renovate check against a saved extraction, of the README's `MaxRAMPercentage` against `entrypoint.sh`, of `hack/lint.sh` against a fixture workflow, and of `hack/check-links.sh` against a `docker` shim that replays lychee's exit codes — plus the step of `check-links.yml` that maps them to a verdict, run as written through `hack/lint.sh` |
+| `hack/test/` | Offline tests of the six scripts above that read the registry, against a fixture registry served by a `curl` shim and a `docker` that records instead of acting, of the mirror against a `docker` shim that answers crane's four commands from that registry, of the Renovate check against a saved extraction, of the README's `MaxRAMPercentage` against `entrypoint.sh`, of `hack/lint.sh` against a fixture workflow, and of `hack/check-links.sh` against a `docker` shim that replays lychee's exit codes — plus the step of `check-links.yml` that maps them to a verdict, run as written through `hack/lint.sh` |
 | `README.md` | User-facing documentation |
 | `examples/kubernetes/` | Reference `Deployment` + `Service` and their README — an example, not a chart; schema-checked by kubeconform in `lint.yml`, brought up in kind by `hack/k8s-example-test.sh` on every build |
 | `.github/assets/` | Images referenced by `README.md`; outside the build context |
@@ -102,7 +103,8 @@ the version a branch would ship and the version its build tests cannot disagree.
 commands are meant to be pasted by someone who does not yet know which version
 to ask for. Those examples are managed too and land in the same PR — prose has
 no `# renovate:` comment to hang off, so `customManagers[2]` matches on the
-literal `ghcr.io/juherr/steve:`, `STEVE_REF=` and `manifests/` forms. Keep those
+literal `juherr/steve:` — bare, the Docker Hub form, or under `ghcr.io/` or
+`docker.io/` — `STEVE_REF=` and `manifests/` forms. Keep those
 shapes when editing a README example, or it leaves Renovate's reach; the third
 form matches nothing today and is kept for the next document that uses it. The
 `image:` line of `examples/kubernetes/deployment.yaml` is the same literal in
@@ -195,6 +197,29 @@ or swapping a component changes the obligations.
   Restoring a `push:` trigger on `main` would republish `steve-X.Y.Z` under a
   new digest for a comment fixed in the `Dockerfile` — that is what it used to
   do.
+- **Docker Hub is a mirror, GHCR the registry.** `docker.io/juherr/steve`
+  carries every `steve-X.Y.Z` the multi-arch build publishes, as a copy of
+  the GHCR index made after the tag exists there: `hack/mirror-tag.sh`, in a
+  `mirror` job of `build-image.yml` that needs `publish` and runs only on
+  `release`. Nothing is built for it and nothing reads it back into the
+  release checks — `release-preflight.sh`, `release-drift.sh`,
+  `scan-targets.sh` ask GHCR and nothing else. The copy is `crane copy`, not
+  `docker buildx imagetools create`: the latter's sources "must already exist
+  in the registry where the new manifest is created" (its reference), so it
+  cannot cross registries; crane pushes the index and its manifests byte for
+  byte, and the digest to pin is the same string on both registries
+  (measured against two local `registry:2`, annotation included; a second
+  copy is a no-op crane reports as "existing manifest"). The Docker Hub
+  token lives in two repository secrets, `DOCKERHUB_USERNAME` and
+  `DOCKERHUB_TOKEN`, reaches only that job — no image, no build, no GHCR
+  write — and goes to `crane auth login --password-stdin` in a config
+  directory the script makes and removes, never to `docker login`: the
+  daemon never holds it, and on macOS Docker Desktop writes `credsStore`
+  into whatever `DOCKER_CONFIG` it is given, which crane cannot read
+  (measured). A failed mirror is a red release run, re-run alone with
+  *Re-run failed jobs* — the outputs of `publish` survive, nothing rebuilds.
+  No `latest` there either, and no Hub-side description: Docker Hub takes a
+  repository's description from its settings, not from the image.
 - **`release.yml` moves the branch; it does not become a second way to ship.**
   It exists so that releasing needs no terminal. It carries **no version input**
   — the version is read from `ARG STEVE_REF` at dispatch time, and an input
@@ -284,11 +309,15 @@ gates, offline: a finding fails the pull request, and a waiver is a comment
 on the line that earned it, with its reason, as the `# hadolint ignore=`
 ones are. Every checkout sets `persist-credentials: false` except the one in
 `release.yml`, which says why it keeps them. Then the
-six suites under `hack/test/`, which are the whole test suite, no network:
+seven suites under `hack/test/`, which are the whole test suite, no network:
 `registry-readers.sh` for `image-config.sh`, the two release readers and
 `scan-targets.sh`, `release-publish.sh` for the two scripts that run only on
 `release` — `check-pushed-digest.sh` in each build job and `publish-index.sh`
-in the `publish` job — `renovate-extract.sh` for the Renovate check below,
+in the `publish` job — `mirror-tag.sh` for the third, `hack/mirror-tag.sh` in
+the `mirror` job, against a `docker` shim that answers crane's `manifest`,
+`digest`, `copy` and `auth login` from the fixture registry and records
+every invocation — the pinned image, the config mount, the token on stdin
+and never on a command line — `renovate-extract.sh` for the Renovate check below,
 against a saved extraction, `readme-entrypoint.sh`, which holds the
 README's `-XX:MaxRAMPercentage` to the value `entrypoint.sh` sets — the one
 runtime number the documentation quotes — and `lint-script.sh` for
@@ -397,6 +426,19 @@ REF="ghcr.io/juherr/steve:$(sed -n 's/^ARG STEVE_REF=//p' Dockerfile)"
 docker buildx imagetools inspect "$REF"
 docker buildx imagetools inspect "$REF" --format '{{ json .Image }}' | jq 'map_values(.config.Labels)'
 ```
+
+And the Docker Hub mirror of that tag, which must print the same index
+digest — one `Digest:` line on each side, equal, is the whole proof:
+
+```bash
+docker buildx imagetools inspect "$REF" --format '{{ .Manifest.Digest }}'
+docker buildx imagetools inspect "docker.io/${REF#ghcr.io/}" --format '{{ .Manifest.Digest }}'
+```
+
+A change to `hack/mirror-tag.sh` is proven by its suite, then by running it
+against a published tag with a Docker Hub token of your own — it copies
+nothing new when the mirror already holds the index, and still reads it
+back. The `mirror` job itself is proven by nothing but the next release.
 
 When the image grows unexpectedly, the layer-by-layer breakdown — what each
 instruction added, and how much of it is wasted because a later layer deleted

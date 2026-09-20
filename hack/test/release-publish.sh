@@ -57,6 +57,15 @@ run 'the published index carries the platform manifests'"'"' description as its 
   jq -r '.annotations["org.opencontainers.image.description"]' "${FAKE_REGISTRY}/v2/juherr/steve/manifests/steve-1.0.1"
 expect_status 0 && expect_out 'SteVe OCPP Central System, compiled at build time from an unmodified upstream release tag.' && pass
 
+# The mirror job copies this digest rather than resolving the tag again; the
+# line is written only where a step output exists.
+reset_log
+run 'the index digest is handed to the workflow as a step output' \
+  env EXPECTED_REVISION="${revision}" GITHUB_OUTPUT="${work}/github-output" "${publish}" steve-1.0.1 sha256:pub-amd64 sha256:pub-arm64
+expect_status 0 && expect_published steve-1.0.1 \
+  && { grep -q "^index_digest=$(sed -n 's/.*steve-1.0.1@\(sha256:[0-9a-f]*\).*/\1/p' <<<"${out}")$" "${work}/github-output" \
+       || fail "no index_digest line in GITHUB_OUTPUT: $(cat "${work}/github-output")"; } && pass
+
 # --- publish-index.sh: refusals -------------------------------------------
 
 reset_log

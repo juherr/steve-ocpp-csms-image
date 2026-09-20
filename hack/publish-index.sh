@@ -118,6 +118,9 @@ index=$(docker buildx imagetools inspect "${IMAGE}:${tag}" --format '{{ .Manifes
 echo "Pushed: ${IMAGE}:${tag} (linux/amd64, linux/arm64)"
 echo "Digest to pin:"
 echo "${IMAGE}:${tag}@${index}"
+# Handed to the mirror job as a step output: it copies this digest, not
+# whatever the tag resolves to when it runs.
+[ -z "${GITHUB_OUTPUT:-}" ] || echo "index_digest=${index}" >> "${GITHUB_OUTPUT}"
 summary <<EOF2
 ### Published \`${IMAGE}:${tag}\`
 

@@ -59,6 +59,12 @@
             "depName": "steve-community/steve",
             "currentValue": "steve-1.0.1",
             "datasource": "github-releases",
+            "replaceString": "juherr/steve:steve-1.0.1"
+          },
+          {
+            "depName": "steve-community/steve",
+            "currentValue": "steve-1.0.1",
+            "datasource": "github-releases",
             "replaceString": "STEVE_REF=steve-1.0.1"
           }
         ]

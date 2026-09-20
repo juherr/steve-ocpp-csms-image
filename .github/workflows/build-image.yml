@@ -93,6 +93,13 @@ env:
   # Engine and buildx, which were never pinned either — not a component of the
   # image, whose base images are.
   BUILDER: steve-builder
+  # The mirror to Docker Hub is a copy, not a build, and the tool that copies
+  # an index across registries verbatim is crane — `imagetools create` cannot,
+  # its sources must already sit in the destination registry (its reference).
+  # Pinned and Renovate-managed like the linters: it decides what lands on
+  # Docker Hub, which is closer to a component than to a build tool.
+  # renovate: datasource=docker depName=gcr.io/go-containerregistry/crane
+  CRANE_IMAGE: "gcr.io/go-containerregistry/crane:v0.22.1"
 
 jobs:
   build:
@@ -410,6 +417,10 @@ jobs:
       STEVE_REF: ${{ needs.build.outputs.steve_ref }}
       DIGEST_AMD64: ${{ needs.build.outputs.digest_amd64 }}
       DIGEST_ARM64: ${{ needs.build.outputs.digest_arm64 }}
+    # The index digest, for the mirror job: what it copies must be what was
+    # just made, not whatever the tag resolves to by then.
+    outputs:
+      index_digest: ${{ steps.publish.outputs.index_digest }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -436,6 +447,7 @@ jobs:
       # (hack/test/release-publish.sh) rather than a first run at release
       # time. The revision every platform must carry is this commit's.
       - name: Publish the index
+        id: publish
         env:
           EXPECTED_REVISION: ${{ github.sha }}
         run: ./hack/publish-index.sh "${STEVE_REF}" "${DIGEST_AMD64}" "${DIGEST_ARM64}"
@@ -443,3 +455,41 @@ jobs:
       - name: Cleanup
         if: always()
         run: docker logout ghcr.io || true
+
+  # The same index, on Docker Hub — a mirror for the people who look there
+  # first; GHCR stays the canonical registry and the one every check above
+  # reads. Nothing is built: hack/mirror-tag.sh copies the index the job
+  # above made, by digest, and reads it back — same digest to pin on both
+  # registries. Its own job rather than a step of `publish`, for two reasons:
+  # the Docker Hub token is then held by a job with no image, no build and no
+  # GHCR write; and "Re-run failed jobs" re-runs this one alone, with the
+  # outputs of `publish` intact — a Docker Hub outage costs a re-run of the
+  # copy, not of the build. A failure here is a red run, not a note: the
+  # README promises the tag on both registries.
+  #
+  # Nothing in the script needs `packages`; the checkout reads the pin. The
+  # two secrets reach the script through the environment, as `docker login`
+  # above takes GITHUB_TOKEN, and never touch the daemon: crane logs itself
+  # in, into a config directory the script makes and removes.
+  mirror:
+    name: mirror to Docker Hub
+    # `build` too, for `steve_ref`: only direct needs are in the context.
+    needs: [build, publish]
+    if: github.ref_name == 'release'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    env:
+      STEVE_REF: ${{ needs.build.outputs.steve_ref }}
+      INDEX_DIGEST: ${{ needs.publish.outputs.index_digest }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Mirror the index to Docker Hub
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: ./hack/mirror-tag.sh "${STEVE_REF}" "${INDEX_DIGEST}"

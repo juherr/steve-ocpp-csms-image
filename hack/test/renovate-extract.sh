@@ -45,6 +45,7 @@ env:
 EOF
 cat >"${repo}/README.md" <<'EOF'
 docker pull ghcr.io/juherr/steve:steve-1.0.1
+docker pull juherr/steve:steve-1.0.1
 --build-arg STEVE_REF=steve-1.0.1
 Illustrations name steve-X.Y.Z and are matched by nothing; steve-0.9.0 is a measurement.
 EOF
@@ -65,7 +66,7 @@ export RENOVATE_EXTRACT="${work}/extract.log"
 # --- the tree the entry describes passes ----------------------------------
 
 run 'every pin of the fixture tree is extracted' "${check}"
-expect_status 0 && expect_out 'README.md: 2 of 2' && expect_out 'examples/kubernetes/deployment.yaml: 1 of 1' \
+expect_status 0 && expect_out 'README.md: 3 of 3' && expect_out 'examples/kubernetes/deployment.yaml: 1 of 1' \
   && expect_out "${r} comments: 3 of 3" && pass
 
 # The script is documented as runnable by hand, and a hand runs it from
@@ -77,7 +78,7 @@ mkdir -p "${repo}/hack"
 ln -s "${check}" "${repo}/hack/renovate-extract-check.sh"
 run 'invoked relatively from a subdirectory, the tree is still the repository' \
   bash -c 'cd hack && ./renovate-extract-check.sh'
-expect_status 0 && expect_out 'README.md: 2 of 2' && pass
+expect_status 0 && expect_out 'README.md: 3 of 3' && pass
 
 run 'the image pin is read from the workflow of the tree under check' \
   env -u RENOVATE_EXTRACT bash -c 'cd hack && ./renovate-extract-check.sh'
@@ -88,7 +89,7 @@ expect_status 2 && expect_err 'unhandled invocation: docker run' && expect_err '
 cp "${repo}/README.md" "${work}/README.md.orig"
 printf 'image: ghcr.io/juherr/steve:steve-1.0.1@sha256:<digest>\n' >>"${repo}/README.md"
 run 'a docs literal missing from the extraction fails, naming the file' "${check}"
-expect_status 1 && expect_err 'README.md: 3 SteVe tag literals, 2 extracted' && pass
+expect_status 1 && expect_err 'README.md: 4 SteVe tag literals, 3 extracted' && pass
 cp "${work}/README.md.orig" "${repo}/README.md"
 
 printf 'ghcr.io/juherr/steve:steve-1.0.1\n' >"${repo}/OTHER.md"
@@ -132,6 +133,6 @@ git -C "${repo}" checkout -q -- .github/workflows/lint.yml
   cat "${work}/extract.log"; } >"${work}/pulled.log"
 run 'a log with the image pull before the entry is read past the pull' \
   env RENOVATE_EXTRACT="${work}/pulled.log" "${check}"
-expect_status 0 && expect_out 'README.md: 2 of 2' && pass
+expect_status 0 && expect_out 'README.md: 3 of 3' && pass
 
 exit "${failed}"

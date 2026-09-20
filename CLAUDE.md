@@ -13,9 +13,9 @@ descriptions — in English.
 
 ## Verification has a real cost here
 
-The unit tests are the six suites under `hack/test/`, and they cover the
+The unit tests are the seven suites under `hack/test/`, and they cover the
 scripts that read the registry — including the two that run only on
-`release` — the Renovate check, the README's `MaxRAMPercentage` against
+`release`, and the Docker Hub mirror that runs after them — the Renovate check, the README's `MaxRAMPercentage` against
 `entrypoint.sh`, `hack/lint.sh` — the local way to run `lint.yml`'s
 steps — and the link check's handling of lychee, alone, offline, against
 fixtures where they read one. For
@@ -34,11 +34,13 @@ release as second argument — on a schema that release wrote. So:
   regression in the change under review. `push-by-digest is currently not
   implemented for docker driver` means the `--builder` was dropped and the
   build went to the daemon's default builder — same category.
-- The push-by-digest export and the index publication run only on `release`.
-  A pull request proves the builds and the probes on both runners, and
-  `hack/test/release-publish.sh` proves the checks around the export and the
-  tag; the export itself is proven by nothing but the spike and the next
-  release. Say which of the three a change touched rather than calling the
+- The push-by-digest export, the index publication and the Docker Hub mirror
+  run only on `release`. A pull request proves the builds and the probes on
+  both runners, `hack/test/release-publish.sh` proves the checks around the
+  export and the tag, and `hack/test/mirror-tag.sh` the checks around the
+  copy; the export itself is proven by nothing but the spike and the next
+  release, the copy by a hand run of `hack/mirror-tag.sh` against a published
+  tag. Say which of the four a change touched rather than calling the
   workflow verified.
 - For label-only changes, inspecting `.Config.Labels` on the built image is the
   proof; reading the `Dockerfile` is not.
@@ -97,7 +99,8 @@ Use the native file and search tools.
 
 Merging no longer publishes. Pushing a branch and opening a PR is safe;
 **moving `release` is the release** and overwrites
-`ghcr.io/juherr/steve:steve-X.Y.Z` for every consumer. Two ways in, same act and
+`ghcr.io/juherr/steve:steve-X.Y.Z` for every consumer, and its Docker Hub
+mirror `juherr/steve:steve-X.Y.Z` with it. Two ways in, same act and
 same caution: `git push origin main:release`, or `gh workflow run release.yml
 --ref main`, which is the terminal-free path the Actions tab offers. Never do
 either unless asked for a release in so many words — "merge this" is not that.
