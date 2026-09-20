@@ -12,12 +12,14 @@
 # this: its sources "must already exist in the registry where the new
 # manifest is created" (its reference), which rules out a cross-registry copy.
 #
-# What is checked, and in which order: the source tag is an index of exactly
-# `linux/amd64` and `linux/arm64` — a tag from before the multi-arch build is
-# not mirrored, the README promises both platforms on Docker Hub — and, when
-# the caller hands over the digest it just published, that the tag still
-# resolves to it. Only then the login and the copy, and the mirror is read
-# back: same index digest, same platform digests. A read-back that disagrees
+# What is checked, and in which order: the tag is resolved to its digest,
+# once, and compared with the one the caller hands over when it does — the
+# publish job always does, and the tag must still resolve to what it just
+# made. From there nothing reads the tag again: the digest is the source of
+# the shape check — an index of exactly `linux/amd64` and `linux/arm64`, a
+# tag from before the multi-arch build is not mirrored, the README promises
+# both platforms on Docker Hub — of the login and copy, and of the read-back:
+# same index digest, same platform digests. A read-back that disagrees
 # or cannot be made exits 1 with the Docker Hub tag named — the tag exists
 # there by then, and the message says to check it by hand rather than
 # suggesting a retry would clear it.
@@ -50,7 +52,9 @@ usage() { echo "Usage: DOCKERHUB_USERNAME=<user> DOCKERHUB_TOKEN=<token> $0 <tag
 [ $# -ge 1 ] && [ $# -le 2 ] || usage
 tag=$1; expected=${2:-}
 printf '%s' "${tag}" | grep -Eq '^steve-[0-9]+\.[0-9]+\.[0-9]+$' || usage
-[ -z "${expected}" ] || printf '%s' "${expected}" | grep -Eq '^sha256:[^[:space:]]+$' || usage
+# Two arguments means the caller had a digest to hand over — the workflow
+# always does; an empty one there is a broken hand-over, not a hand run.
+[ $# -eq 1 ] || printf '%s' "${expected}" | grep -Eq '^sha256:[^[:space:]]+$' || usage
 for var in DOCKERHUB_USERNAME DOCKERHUB_TOKEN; do
   [ -n "${!var:-}" ] || { echo "${var} is not set." >&2; usage; }
 done
@@ -70,23 +74,30 @@ trap 'rm -rf "${config}"' EXIT
 crane() { docker run --rm -i -v "${config}:/config" -e DOCKER_CONFIG=/config "${CRANE_IMAGE}" "$@"; }
 
 # --- the source, before anything is written --------------------------------
+#
+# The tag is resolved exactly once. Everything after — the shape check, the
+# copy, the read-back comparison — goes by `${IMAGE}@${source}`, which cannot
+# move: a tag re-read for the copy could name another index than the one
+# that was checked, and the guarantee here is that what lands on Docker Hub
+# is the digest the publish job printed.
 
-manifest=$(crane manifest "${IMAGE}:${tag}") || die "could not read ${IMAGE}:${tag}"
+source=$(crane digest "${IMAGE}:${tag}") || die "could not read ${IMAGE}:${tag}"
+if [ -n "${expected}" ] && [ "${source}" != "${expected}" ]; then
+  die "${IMAGE}:${tag} resolves to ${source}, expected ${expected} — the tag moved since it was published"
+fi
+from="${IMAGE}@${source}"
+manifest=$(crane manifest "${from}") || die "could not read ${from}"
 jq -e '.manifests' <<<"${manifest}" >/dev/null \
   || die "${IMAGE}:${tag} is not an image index — a tag from before the multi-arch build is not mirrored"
 jq -e '[.manifests[].platform | "\(.os)/\(.architecture)"] | sort == ["linux/amd64", "linux/arm64"]' \
   <<<"${manifest}" >/dev/null \
   || die "${IMAGE}:${tag} does not hold exactly linux/amd64 and linux/arm64: $(jq -c '[.manifests[].platform]' <<<"${manifest}")"
-source=$(crane digest "${IMAGE}:${tag}") || die "could not read the digest of ${IMAGE}:${tag}"
-if [ -n "${expected}" ] && [ "${source}" != "${expected}" ]; then
-  die "${IMAGE}:${tag} resolves to ${source}, expected ${expected} — the tag moved since it was published"
-fi
 
 # --- the copy ----------------------------------------------------------------
 
 printf '%s' "${DOCKERHUB_TOKEN}" | crane auth login "${MIRROR%%/*}" -u "${DOCKERHUB_USERNAME}" --password-stdin >/dev/null \
   || die "could not log in to ${MIRROR%%/*} as ${DOCKERHUB_USERNAME}"
-crane copy "${IMAGE}:${tag}" "${MIRROR}:${tag}" || die "could not copy ${IMAGE}:${tag} to ${MIRROR}:${tag}"
+crane copy "${from}" "${MIRROR}:${tag}" || die "could not copy ${from} to ${MIRROR}:${tag}"
 
 # --- read back ---------------------------------------------------------------
 

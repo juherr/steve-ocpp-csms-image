@@ -49,10 +49,21 @@ file() {
   local ref="$1" registry rest repo id
   registry="${ref%%/*}"; rest="${ref#*/}"
   case "${rest}" in *@*) repo="${rest%%@*}"; id="${rest#*@}" ;; *) repo="${rest%%:*}"; id="${rest##*:}" ;; esac
+  local dir
   case "${registry}" in
-    ghcr.io) echo "${FAKE_REGISTRY}/v2/${repo}/manifests/${id}" ;;
-    *) echo "${FAKE_REGISTRY}/v2/${registry}/${repo}/manifests/${id}" ;;
+    ghcr.io) dir="${FAKE_REGISTRY}/v2/${repo}/manifests" ;;
+    *) dir="${FAKE_REGISTRY}/v2/${registry}/${repo}/manifests" ;;
   esac
+  echo "${dir}/${id}"
+}
+# A registry is content-addressed: what a tag resolved to stays readable by
+# its digest after the tag moved. Answering a tag's digest files the content
+# under it, which is what the by-digest reads below find.
+digest_of() {
+  local f="$1" d
+  d="sha256:$(shasum -a 256 "${f}" | cut -d' ' -f1)"
+  [ -f "$(dirname "${f}")/${d}" ] || cp "${f}" "$(dirname "${f}")/${d}"
+  echo "${d}"
 }
 down() { case "$1" in docker.io/*) [ -n "${FAKE_MIRROR_DOWN:-}" ] ;; *) false ;; esac; }
 unknown() { echo "Error: GET https://${1}: MANIFEST_UNKNOWN: manifest unknown" >&2; exit 1; }
@@ -65,7 +76,10 @@ case "$1" in
   digest)
     down "$2" && { echo "Error: GET https://$2: dial tcp: connection refused" >&2; exit 1; }
     f=$(file "$2"); [ -f "${f}" ] || unknown "$2"
-    echo "sha256:$(shasum -a 256 "${f}" | cut -d' ' -f1)" ;;
+    digest_of "${f}"
+    # The tag moves right after it was resolved: what the script does next
+    # must go by the digest it holds, not by the tag.
+    if [ -n "${FAKE_TAG_MOVES_TO:-}" ]; then case "$2" in ghcr.io/*:*) cp "${FAKE_TAG_MOVES_TO}" "${f}" ;; esac; fi ;;
   manifest)
     down "$2" && { echo "Error: GET https://$2: dial tcp: connection refused" >&2; exit 1; }
     f=$(file "$2"); [ -f "${f}" ] || unknown "$2"
@@ -76,7 +90,7 @@ case "$1" in
     [ -f "${config}/config.json" ] || { echo "Error: HEAD https://$3: unexpected status code 401 Unauthorized" >&2; exit 1; }
     mkdir -p "$(dirname "${dst}")"
     if [ -n "${FAKE_COPY_LANDS_AS:-}" ]; then cp "${FAKE_COPY_LANDS_AS}" "${dst}"; else cp "${src}" "${dst}"; fi
-    echo "$3: digest: sha256:$(shasum -a 256 "${dst}" | cut -d' ' -f1) size: 1" ;;
+    echo "$3: digest: $(digest_of "${dst}") size: 1" ;;
   *) echo "fake-docker: unhandled crane $*" >&2; exit 2 ;;
 esac
 SHIM
@@ -88,16 +102,25 @@ hub="${FAKE_REGISTRY}/v2/docker.io/juherr/steve/manifests"
 ghcr_digest() { echo "sha256:$(shasum -a 256 "${FAKE_REGISTRY}/v2/juherr/steve/manifests/$1" | cut -d' ' -f1)"; }
 
 creds=(env DOCKERHUB_USERNAME=mirror DOCKERHUB_TOKEN=s3cret)
-reset() { rm -f "${FAKE_CRANE_LOG}"; rm -rf "${hub}"; }
+# The log, the mirror, and the source tag a test may have moved.
+reset() {
+  rm -f "${FAKE_CRANE_LOG}"; rm -rf "${hub}"
+  cp "${here}/registry/v2/juherr/steve/manifests/steve-1.1.0" "${FAKE_REGISTRY}/v2/juherr/steve/manifests/steve-1.1.0"
+}
 copies() { if [ -f "${FAKE_CRANE_LOG}" ]; then grep -c ' copy ' "${FAKE_CRANE_LOG}" || true; else echo 0; fi; }
 expect_copied()    { [ "$(copies)" -eq 1 ] || { fail "expected exactly one copy, got $(copies)"; return 1; }; }
 expect_untouched() { [ "$(copies)" -eq 0 ] || { fail "a copy was made: $(grep ' copy ' "${FAKE_CRANE_LOG}")"; return 1; }; }
-# Every crane invocation went through the pinned image with the config
-# mounted, and the login took the token on stdin, never as an argument.
+# Every crane invocation went through the image the workflow pins — the
+# exact reference, tag and digest, read from the workflow rather than
+# matched by shape — with the config mounted, and the login took the token
+# on stdin, never as an argument.
+pin=$(sed -n 's/^  CRANE_IMAGE: "\(.*\)"$/\1/p' "${HACK_DIR}/../.github/workflows/build-image.yml")
+[[ "${pin}" =~ ^gcr\.io/go-containerregistry/crane:v[0-9.]+@sha256:[0-9a-f]{64}$ ]] \
+  || { echo "FAIL the workflow pins CRANE_IMAGE as '${pin}', not as tag@digest"; exit 1; }
 expect_invocations() {
   local line
   while IFS= read -r line; do
-    [[ "${line}" == "run --rm -i -v "*":/config -e DOCKER_CONFIG=/config gcr.io/go-containerregistry/crane:v"* ]] \
+    [[ "${line}" == "run --rm -i -v "*":/config -e DOCKER_CONFIG=/config ${pin} "* ]] \
       || { fail "an invocation is not through the pinned crane with the config mounted: ${line}"; return 1; }
     [[ "${line}" != *"s3cret"* ]] || { fail "the token is on a command line: ${line}"; return 1; }
   done <"${FAKE_CRANE_LOG}"
@@ -114,6 +137,10 @@ run 'a two-platform index tag is copied once and reads back with the same digest
 expect_status 0 && expect_copied && expect_out "Mirrored: docker.io/juherr/steve:steve-1.1.0@$(ghcr_digest steve-1.1.0)" \
   && expect_invocations && expect_no_leftover && pass
 
+run 'the copy is made from the resolved digest, not from the tag' \
+  grep -E ' copy ghcr.io/juherr/steve@sha256:[0-9a-f]{64} docker.io/juherr/steve:steve-1.1.0$' "${FAKE_CRANE_LOG}"
+expect_status 0 && pass
+
 run 'the mirrored tag is the GHCR index byte for byte' \
   cmp "${FAKE_REGISTRY}/v2/juherr/steve/manifests/steve-1.1.0" "${hub}/steve-1.1.0"
 expect_status 0 && pass
@@ -129,6 +156,19 @@ reset
 run 'the expected digest handed over by the publish job is accepted when it matches' \
   "${creds[@]}" "${mirror}" steve-1.1.0 "$(ghcr_digest steve-1.1.0)"
 expect_status 0 && expect_copied && pass
+
+# The tag moves to a single-manifest image the instant after it was
+# resolved: the digest already in hand is what is validated and copied, so
+# the mirror holds the index that was checked — and not the manifest the
+# tag now names, which would have been refused had it been read.
+reset
+run 'a tag that moves after being resolved does not change what is mirrored' \
+  env FAKE_TAG_MOVES_TO="${FAKE_REGISTRY}/v2/juherr/steve/manifests/steve-1.0.0" "${creds[@]}" "${mirror}" steve-1.1.0
+expect_status 0 && expect_copied \
+  && { cmp -s "${hub}/steve-1.1.0" "${FAKE_REGISTRY}/v2/juherr/steve/manifests/steve-1.0.0" \
+       && { fail "the mirror holds what the tag moved to"; false; } || true; } \
+  && { grep -q '"mediaType": "application/vnd.oci.image.index.v1+json"' "${hub}/steve-1.1.0" \
+       || { fail "the mirror is not the index that was resolved"; false; }; } && pass
 
 # --- refusals, before the copy -------------------------------------------
 
@@ -174,6 +214,12 @@ expect_status 2 && expect_err 'DOCKERHUB_USERNAME' && expect_untouched && pass
 run 'a tag that is not steve-X.Y.Z is a usage error' \
   "${creds[@]}" "${mirror}" latest
 expect_status 2 && expect_err 'Usage' && pass
+
+# The workflow always passes two arguments; an empty second one is a
+# broken hand-over from the publish job, not a hand run without one.
+run 'an empty expected digest is a usage error, not a run without one' \
+  "${creds[@]}" "${mirror}" steve-1.1.0 ''
+expect_status 2 && expect_err 'Usage' && expect_untouched && pass
 
 run 'a malformed expected digest is a usage error' \
   "${creds[@]}" "${mirror}" steve-1.1.0 pub-index

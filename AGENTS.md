@@ -87,6 +87,11 @@ updates. A comment adjacent to the pin is not enough — check that
 silently freezes. `customManagers[1]` deliberately matches every workflow and
 `customManagers[2]` every Markdown file and every YAML under `examples/`, so a
 linter, scanner, document or manifest added later is managed on arrival.
+One pin is a tag *and* a digest: `CRANE_IMAGE` in `build-image.yml`, the
+container that is handed the Docker Hub token and decides what lands there —
+the standing of the SHA-pinned actions, not of a linter. The tag stays for
+reading; `customManagers[1]` reads the digest too (`currentDigest`, measured
+by the extraction check), so Renovate moves both halves in one PR.
 One pin is deliberately a major only: `RENOVATE_IMAGE` in `lint.yml`, the
 image that validates `renovate.json` and runs the extraction check. It is a
 tool of the pull request, not a component of the image, and a full pin meant
@@ -201,7 +206,12 @@ or swapping a component changes the obligations.
   carries every `steve-X.Y.Z` the multi-arch build publishes, as a copy of
   the GHCR index made after the tag exists there: `hack/mirror-tag.sh`, in a
   `mirror` job of `build-image.yml` that needs `publish` and runs only on
-  `release`. Nothing is built for it and nothing reads it back into the
+  `release`. The script resolves the tag once, refuses it unless it is the
+  digest `publish` handed over — an empty hand-over is a usage error, not a
+  run without one — and from there reads, checks and copies
+  `ghcr.io/juherr/steve@<digest>`, never the tag again: a tag re-read for
+  the copy could name another index than the one that was checked. Nothing
+  is built for it and nothing reads it back into the
   release checks — `release-preflight.sh`, `release-drift.sh`,
   `scan-targets.sh` ask GHCR and nothing else. The copy is `crane copy`, not
   `docker buildx imagetools create`: the latter's sources "must already exist

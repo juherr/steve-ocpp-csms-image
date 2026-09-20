@@ -23,7 +23,8 @@ check="${HACK_DIR}/renovate-extract-check.sh"
 setup_fixtures
 
 # The tree the fixture entry describes: one docs literal of each managed
-# shape, the Dockerfile ARG, a workflow pin and the image line of a Kubernetes
+# shape, the Dockerfile ARG, a workflow pin by tag and one by tag@digest,
+# and the image line of a Kubernetes
 # example manifest — every manager renovate.json declares, exercised once. The
 # comment marker is spelled through a variable: the check reads every tracked
 # file, this one included, and would otherwise count these fixtures as pins of
@@ -42,6 +43,8 @@ env:
   HADOLINT_IMAGE: "hadolint/hadolint:v2.0.0"
   ${r} datasource=docker depName=renovate/renovate
   RENOVATE_IMAGE: "renovate/renovate:1.0.0"
+  ${r} datasource=docker depName=gcr.io/go-containerregistry/crane
+  CRANE_IMAGE: "gcr.io/go-containerregistry/crane:v1.0.0@sha256:0000000000000000000000000000000000000000000000000000000000000000"
 EOF
 cat >"${repo}/README.md" <<'EOF'
 docker pull ghcr.io/juherr/steve:steve-1.0.1
@@ -67,7 +70,7 @@ export RENOVATE_EXTRACT="${work}/extract.log"
 
 run 'every pin of the fixture tree is extracted' "${check}"
 expect_status 0 && expect_out 'README.md: 3 of 3' && expect_out 'examples/kubernetes/deployment.yaml: 1 of 1' \
-  && expect_out "${r} comments: 3 of 3" && pass
+  && expect_out "${r} comments: 4 of 4" && pass
 
 # The script is documented as runnable by hand, and a hand runs it from
 # wherever the shell is: the tree it checks and the workflow it reads the

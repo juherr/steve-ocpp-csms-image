@@ -96,10 +96,11 @@ env:
   # The mirror to Docker Hub is a copy, not a build, and the tool that copies
   # an index across registries verbatim is crane — `imagetools create` cannot,
   # its sources must already sit in the destination registry (its reference).
-  # Pinned and Renovate-managed like the linters: it decides what lands on
-  # Docker Hub, which is closer to a component than to a build tool.
+  # Pinned by digest, the tag kept for reading, and Renovate moves both: this
+  # container is handed the Docker Hub token and decides what lands there,
+  # the same standing as the SHA-pinned actions, not the linters' tag pin.
   # renovate: datasource=docker depName=gcr.io/go-containerregistry/crane
-  CRANE_IMAGE: "gcr.io/go-containerregistry/crane:v0.22.1"
+  CRANE_IMAGE: "gcr.io/go-containerregistry/crane:v0.22.1@sha256:1f968817b95790bed063f71175aa6b8ff879fa17064020415f3e18bb6e6a36e1"
 
 jobs:
   build:
