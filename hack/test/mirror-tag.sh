@@ -79,7 +79,8 @@ case "$1" in
     digest_of "${f}"
     # The tag moves right after it was resolved: what the script does next
     # must go by the digest it holds, not by the tag.
-    if [ -n "${FAKE_TAG_MOVES_TO:-}" ]; then case "$2" in ghcr.io/*:*) cp "${FAKE_TAG_MOVES_TO}" "${f}" ;; esac; fi ;;
+    if [ -n "${FAKE_TAG_MOVES_TO:-}" ]; then case "$2" in ghcr.io/*:*) cp "${FAKE_TAG_MOVES_TO}" "${f}" ;; esac; fi
+    if [ -n "${FAKE_MIRROR_MOVES_TO:-}" ]; then case "$2" in docker.io/*:*) cp "${FAKE_MIRROR_MOVES_TO}" "${f}" ;; esac; fi ;;
   manifest)
     down "$2" && { echo "Error: GET https://$2: dial tcp: connection refused" >&2; exit 1; }
     f=$(file "$2"); [ -f "${f}" ] || unknown "$2"
@@ -170,6 +171,17 @@ expect_status 0 && expect_copied \
   && { grep -q '"mediaType": "application/vnd.oci.image.index.v1+json"' "${hub}/steve-1.1.0" \
        || { fail "the mirror is not the index that was resolved"; false; }; } && pass
 
+# The Docker Hub tag moves the instant after it was resolved for the
+# read-back: the digest in hand is what the platform check reads, so the
+# script does not mistake another writer's index for its own — nor report
+# a mismatch for a copy that landed as checked.
+reset
+run 'a Docker Hub tag that moves after being resolved is still verified by that digest' \
+  env FAKE_MIRROR_MOVES_TO="${FAKE_REGISTRY}/v2/juherr/steve/manifests/steve-1.0.1" "${creds[@]}" "${mirror}" steve-1.1.0
+expect_status 0 && expect_copied && expect_out "Mirrored: docker.io/juherr/steve:steve-1.1.0@$(ghcr_digest steve-1.1.0)" \
+  && { grep -Eq " manifest docker.io/juherr/steve@$(ghcr_digest steve-1.1.0)\$" "${FAKE_CRANE_LOG}" \
+       || { fail "the read-back did not inspect the mirror by the digest it resolved: $(grep ' manifest docker.io' "${FAKE_CRANE_LOG}")"; false; }; } && pass
+
 # --- refusals, before the copy -------------------------------------------
 
 reset
@@ -223,6 +235,18 @@ expect_status 2 && expect_err 'Usage' && expect_untouched && pass
 
 run 'a malformed expected digest is a usage error' \
   "${creds[@]}" "${mirror}" steve-1.1.0 pub-index
+expect_status 2 && expect_err 'Usage' && pass
+
+# A digest is `sha256:` and 64 hex digits, nothing shorter or looser: the
+# workflow hands one over verbatim, and a truncated or mistyped value must
+# not reach the registry as an expectation nothing can meet.
+reset
+run 'a digest that is not 64 hex digits is a usage error, nothing copied' \
+  "${creds[@]}" "${mirror}" steve-1.1.0 sha256:x
+expect_status 2 && expect_err 'Usage' && expect_untouched && pass
+
+run 'a digest with uppercase hex is a usage error' \
+  "${creds[@]}" "${mirror}" steve-1.1.0 "sha256:$(printf 'A%.0s' $(seq 1 64))"
 expect_status 2 && expect_err 'Usage' && pass
 
 exit "${failed}"

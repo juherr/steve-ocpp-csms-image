@@ -53,8 +53,9 @@ usage() { echo "Usage: DOCKERHUB_USERNAME=<user> DOCKERHUB_TOKEN=<token> $0 <tag
 tag=$1; expected=${2:-}
 printf '%s' "${tag}" | grep -Eq '^steve-[0-9]+\.[0-9]+\.[0-9]+$' || usage
 # Two arguments means the caller had a digest to hand over — the workflow
-# always does; an empty one there is a broken hand-over, not a hand run.
-[ $# -eq 1 ] || printf '%s' "${expected}" | grep -Eq '^sha256:[^[:space:]]+$' || usage
+# always does; an empty one there is a broken hand-over, not a hand run —
+# and a digest is `sha256:` and 64 hex digits, nothing shorter or looser.
+[ $# -eq 1 ] || printf '%s' "${expected}" | grep -Eq '^sha256:[0-9a-f]{64}$' || usage
 for var in DOCKERHUB_USERNAME DOCKERHUB_TOKEN; do
   [ -n "${!var:-}" ] || { echo "${var} is not set." >&2; usage; }
 done
@@ -100,12 +101,16 @@ printf '%s' "${DOCKERHUB_TOKEN}" | crane auth login "${MIRROR%%/*}" -u "${DOCKER
 crane copy "${from}" "${MIRROR}:${tag}" || die "could not copy ${from} to ${MIRROR}:${tag}"
 
 # --- read back ---------------------------------------------------------------
+#
+# The mirror's tag is resolved once too; the platform check reads the digest
+# it resolved to, so another writer moving the tag in between neither passes
+# its index off as this copy nor fails a copy that landed as checked.
 
 mirrored=$(crane digest "${MIRROR}:${tag}") \
   || die "${MIRROR}:${tag} cannot be read back after the copy — check it by hand"
 [ "${mirrored}" = "${source}" ] \
   || die "${MIRROR}:${tag} reads back as ${mirrored}, not the ${source} that was copied — check it by hand"
-platforms=$(crane manifest "${MIRROR}:${tag}" | jq -c '[.manifests[] | {digest, platform}] | sort_by(.digest)') \
+platforms=$(crane manifest "${MIRROR}@${mirrored}" | jq -c '[.manifests[] | {digest, platform}] | sort_by(.digest)') \
   || die "${MIRROR}:${tag} cannot be read back after the copy — check it by hand"
 [ "${platforms}" = "$(jq -c '[.manifests[] | {digest, platform}] | sort_by(.digest)' <<<"${manifest}")" ] \
   || die "${MIRROR}:${tag} does not list the platform digests of ${IMAGE}:${tag}: ${platforms} — check it by hand"
