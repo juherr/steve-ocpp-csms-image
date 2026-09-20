@@ -34,7 +34,7 @@ env:
   # renovate: datasource=docker depName=koalaman/shellcheck
   SHELLCHECK_IMAGE: "koalaman/shellcheck:v0.11.0"
   # renovate: datasource=docker depName=renovate/renovate
-  RENOVATE_IMAGE: "renovate/renovate:44.94.0"
+  RENOVATE_IMAGE: "renovate/renovate:44.103.7"
   # renovate: datasource=docker depName=ghcr.io/zizmorcore/zizmor
   ZIZMOR_IMAGE: "ghcr.io/zizmorcore/zizmor:1.30.1"
 
