@@ -64,7 +64,7 @@ RUN ./mvnw -B -V -DskipTests -Dmaven.javadoc.skip=true \
 # --- Source of the Flyway CLI (migrates the runtime database on startup) ------
 # Official glibc image (not -alpine): the CLI ships no JRE of its own and runs
 # on the runtime stage's Temurin, which is glibc-based. Pinned tag.
-FROM flyway/flyway:13.7.0 AS flyway
+FROM flyway/flyway:13.8.0 AS flyway
 
 # Keep only the MariaDB path. The CLI ships ~20 JDBC drivers and their Flyway
 # plugins; the entrypoint only ever opens jdbc:mariadb://, and the unused
