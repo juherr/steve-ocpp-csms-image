@@ -108,7 +108,7 @@ jobs:
         include: ${{ fromJSON(needs.discover.outputs.matrix) }}
     env:
       # renovate: datasource=docker depName=aquasec/trivy
-      TRIVY_IMAGE: "aquasec/trivy:0.74.0"
+      TRIVY_IMAGE: "aquasec/trivy:0.75.0"
     steps:
       # upload-sarif resolves the commit and ref from the checkout in the
       # workspace; without it the workspace is empty and the upload fails.
