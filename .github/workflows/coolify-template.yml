@@ -1,0 +1,55 @@
+---
+# The Coolify template, run as it is written: hack/coolify-template-test.sh
+# brings it up twice, side by side, with plain Compose standing in for
+# Coolify — what is checked is documented in the script.
+#
+# A workflow of its own rather than a step elsewhere. The template names a
+# published tag, and the point is to pull and boot that tag on the pull
+# request that moves it — Renovate's, after a release — which a step in
+# build-image.yml, running the image it has just built, would not do; and a
+# YAML change here should not cost an image build. Not in lint.yml either:
+# that one runs no database.
+#
+# The image is pulled from GHCR, the database from Docker Hub; nothing is
+# pushed, no credential is needed. The runner is thrown away, so the script's
+# own cleanup is the only one.
+
+name: Coolify template
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "deploy/coolify/**"
+      - "hack/coolify-template-test.sh"
+      - "renovate.json"
+      - ".github/workflows/coolify-template.yml"
+  pull_request:
+    paths:
+      - "deploy/coolify/**"
+      - "hack/coolify-template-test.sh"
+      - "renovate.json"
+      - ".github/workflows/coolify-template.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: coolify-template-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: two installations of the template
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Bring the template up twice, restart one
+        run: |
+          set -euo pipefail
+          docker compose version
+          ./hack/coolify-template-test.sh
