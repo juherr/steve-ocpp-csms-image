@@ -221,7 +221,9 @@ See upstream's `application.properties` for the full list.
 The three `AUTH_*`/`WEBAPI_*` values seed the administrator SteVe creates when
 its database holds none, and are not read again: changing `AUTH_PASSWORD`
 once the database exists leaves the old password the one that works
-(measured on `steve-3.14.1`) — change it in SteVe's user management instead.
+(measured on `steve-3.14.1`). That release has no page to change it; delete
+the administrator's row from the `web_user` table and restart, and SteVe
+creates it again from the current values (measured).
 The Web API under `/steve/api/` takes Basic authentication with a user's API
 password; an administrator created with `WEBAPI_VALUE` empty has none, and
 every call answers 401 (measured). `WEBAPI_KEY`, which older documentation

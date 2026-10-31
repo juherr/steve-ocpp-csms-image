@@ -138,9 +138,10 @@ path is added in `renovate.json`, the manager's default pattern only matches
 `steve-X.Y.Z` versioning a `packageRule` gives `ghcr.io/juherr/steve`, so the
 template moves in a PR of its own once the next tag exists (measured with a
 lookup run on an older published tag). It names the tag without a digest, a
-choice for the template's users: a redeploy picks up a republished tag. Its
-README says how to pin a digest, and the template test and the extraction
-check accept one. Keep `deploy/coolify/README.md` free of tag literals: as a
+choice for the template's users: a republished tag is meant to be taken on
+the next pull — whether a Coolify redeploy pulls is on the manual checklist.
+Its README says how to pin a digest, and the template test and the
+extraction check accept one. Keep `deploy/coolify/README.md` free of tag literals: as a
 Markdown file it is the Markdown manager's, and would move ahead of the
 template it describes.
 

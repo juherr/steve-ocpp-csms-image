@@ -25,10 +25,13 @@ it is, with plain Compose standing in for Coolify; see *What is tested*.
 
 The image is the one line that names a release: the `image:` of the `steve`
 service, `ghcr.io/juherr/steve:steve-X.Y.Z`. It is a tag without a digest on
-purpose, so that a redeploy picks up the tag as republished — a JRE update
-republishes the same tag, see [*Tags*](../../README.md#tags). Pin it by digest
-yourself if you would rather review that change: append the index digest
-`docker buildx imagetools inspect` prints, `…:steve-X.Y.Z@sha256:<digest>`.
+purpose: a JRE update republishes the same tag (see
+[*Tags*](../../README.md#tags)), and the template is meant to take it on the
+next pull of the image rather than through a change to the file. Whether a
+plain redeploy in Coolify pulls again or keeps the image the server already
+holds is on the checklist below. Pin it by digest yourself if you would
+rather review that change: append the index digest `docker buildx imagetools
+inspect` prints, `…:steve-X.Y.Z@sha256:<digest>`.
 
 ## Generated credentials
 
@@ -50,9 +53,21 @@ points are rejected — see *Security*.
 administrator yet, and never again: changing `SERVICE_PASSWORD_ADMIN` after
 the first deploy leaves the old password the one that works (measured on
 `steve-3.14.1`). MariaDB does the same with `MARIADB_*` — they are applied to
-an empty data directory only. Change a password where it lives instead: in
-SteVe's own user management for the administrator, with `ALTER USER` in the
-database for `steve` — then the variable, so that the two agree.
+an empty data directory only.
+
+SteVe at that release has no page to change a password, so the way to a new
+administrator password is to let SteVe create the administrator again: change
+the variable in Coolify, delete the administrator's row from `steve-db`,
+then restart `steve` — it finds no administrator and creates one from the
+current `AUTH_USER`, `AUTH_PASSWORD` and `WEBAPI_VALUE` (measured; nothing
+else in the schema references that table):
+
+```bash
+MYSQL_PWD="$MARIADB_PASSWORD" mariadb -u steve stevedb -e "DELETE FROM web_user WHERE username = '<AUTH_USER>'"
+```
+
+For the database password, `ALTER USER` in the database first, then the
+variable, so that the two agree.
 
 ## Management UI and OCPP endpoints
 
@@ -87,9 +102,10 @@ domain. What protects each:
 - **The Web API** (`/steve/api/`) — off. Upstream enables it per user, with an
   API password the administrator receives from `WEBAPI_VALUE` on the first
   start; the template pins it empty, so the administrator has none and every
-  call answers 401, even with the UI password (measured). To use it, set
-  `WEBAPI_VALUE` before the first deploy, or give a user an API password in
-  SteVe afterwards.
+  call answers 401, even with the UI password (measured). To use it, edit
+  that line of the Compose file in Coolify — `WEBAPI_VALUE=${SERVICE_PASSWORD_WEBAPI}`
+  has Coolify generate the secret — before the first deploy, or afterwards
+  followed by the administrator reset under *Generated credentials*.
 
 So a public domain exposes a sign-in page and two machine endpoints. To keep
 the UI off the internet, put an access policy in front of the domain — an IP
@@ -104,14 +120,13 @@ from.
 
 ## Memory
 
-The image starts the JVM with `-XX:MaxRAMPercentage=85`, so the heap is
-sized from the container's memory limit — and without a limit, from the whole
-server, once per SteVe on it. The template sets `mem_limit` from
-`STEVE_MEMORY_LIMIT`, `1g` by default: an observed working value, not a
-sizing recommendation — idle, no charge point connected, the container
-settles around 525 MiB under it, and still migrates and becomes healthy under
-`512m`, with nothing to spare (measured, see
-[*Deploying on a NAS or a small board*](../../README.md#deploying-on-a-nas-or-a-small-board)).
+The JVM sizes its heap from the container's memory limit — and without a
+limit, from the whole server, once per SteVe on it. The template sets
+`mem_limit` from `STEVE_MEMORY_LIMIT`, `1g` by default: an observed working
+value, not a sizing recommendation. What the heap takes of it, what the
+container was measured at under `1g` and under less, and why the limit has to
+hold more than the heap, are in the main README's *Memory* paragraph, under
+[*Deploying on a NAS or a small board*](../../README.md#deploying-on-a-nas-or-a-small-board).
 Raise it with the number of charge points; `docker stats` on the server reads
 what they add. MariaDB has no limit and sizes itself.
 
@@ -228,6 +243,11 @@ Record the Coolify version, then:
 - [ ] A redeploy on a new tag: whether the old `steve` container is stopped
       before the new one starts, and the `Migrating schema` lines in the new
       one's log.
+- [ ] A redeploy on the same tag: whether Coolify pulls the image again (a
+      republished tag reaches the instance) or reuses the one on the server.
+- [ ] The administrator reset under *Generated credentials*: a new
+      `SERVICE_PASSWORD_ADMIN`, the row deleted, `steve` restarted, the new
+      password signs in.
 
 Results, and any Coolify limitation found on the way, go below.
 
@@ -260,5 +280,6 @@ The header comments are the metadata Coolify's catalog reads — `documentation`
   [`website/logo/managed-by-steve.pdf`](https://github.com/steve-community/steve/blob/master/website/logo/managed-by-steve.pdf);
   the SVG is that PDF's own paths — `pdftocairo -svg`, then the three paths of
   the mark kept, unchanged, under a square `viewBox` — not a tracing of a
-  PNG. It stays under SteVe's GPL-3.0-or-later, the one file of this
-  repository that is not Apache-2.0 (see `NOTICE`).
+  PNG. Upstream states no separate licence for its logo, so the repository's
+  is assumed to cover it: the file stays under SteVe's GPL-3.0-or-later, the
+  one file of this repository that is not Apache-2.0 (see `NOTICE`).

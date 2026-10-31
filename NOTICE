@@ -7,9 +7,9 @@ License, Version 2.0. See LICENSE.
 
 One file is not: `deploy/coolify/steve.svg`, the SteVe logo mark. Its paths
 are taken unchanged from upstream's `website/logo/managed-by-steve.pdf`,
-converted to SVG and cropped to the mark, so it stays under SteVe's
-GPL-3.0-or-later (see below). It is a documentation asset, never part of the
-image.
+converted to SVG and cropped to the mark. Upstream states no separate licence
+for its logo, so SteVe's, GPL-3.0-or-later (see below), is assumed to cover
+it. It is a documentation asset, never part of the image.
 
 The LICENSE file does NOT cover the contents of the Docker image these files
 produce. That image is an aggregate of separate, independently licensed
