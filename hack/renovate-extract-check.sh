@@ -10,8 +10,9 @@
 # the Kubernetes example manifests — must yield as many SteVe-tag dependencies
 # as it has literals in the shapes renovate.json declares, and every image line
 # of a Compose file renovate.json adds to the docker-compose manager — the
-# Coolify template — must be extracted, its digest with it. The shapes and the
-# files they apply to are read from renovate.json, not copied here.
+# Coolify template — must be extracted, with its digest when it has one. The
+# shapes and the files they apply to are read from renovate.json, not copied
+# here.
 #
 # Usage:  ./hack/renovate-extract-check.sh    (from anywhere in the repository)
 # Env:    RENOVATE_IMAGE    the Renovate image to run; defaults to the pin in

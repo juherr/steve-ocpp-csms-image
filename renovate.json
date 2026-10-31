@@ -36,7 +36,7 @@
         "ghcr.io/juherr/steve"
       ],
       "versioning": "regex:^steve-(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)$",
-      "description": "The published image, read from the registry rather than from upstream's releases: the Coolify template pins a tag and its index digest, and both can only move once the tag exists. Same tag format as the upstream release it packages"
+      "description": "The published image, read from the registry rather than from upstream's releases: the Coolify template names a published tag, which can only move once the next one exists. Same tag format as the upstream release it packages"
     }
   ],
   "docker-compose": {

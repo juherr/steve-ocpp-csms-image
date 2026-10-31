@@ -13,9 +13,10 @@
 
 services:
   steve:
-    # Tag and index digest; Renovate's docker datasource moves both, and only
-    # once the tag is published.
-    image: ghcr.io/juherr/steve:steve-3.14.1@sha256:5985fbdef33d891689b621d8601892c095de162222f0840b1f675ca89e714fe7
+    # A tag, no digest: a redeploy picks up the tag as republished (a JRE
+    # update). Renovate reads it from the registry, so it moves only once the
+    # next tag is published.
+    image: ghcr.io/juherr/steve:steve-3.14.1
     environment:
       # Coolify routes the generated domain to the container's 8180.
       - SERVICE_URL_STEVE_8180

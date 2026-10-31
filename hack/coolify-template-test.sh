@@ -28,8 +28,8 @@
 # even with the UI password; an unknown charge point's WebSocket upgrade
 # answers 404.
 #
-# Given no IMAGE, the template runs as pinned — the tag@digest Renovate moves
-# is pulled and booted on the pull request that moves it. Given one, it
+# Given no IMAGE, the template runs as written — the tag Renovate moves is
+# pulled and booted on the pull request that moves it. Given one, it
 # replaces only the steve image, the rest of the template unchanged.
 #
 # Usage:  ./hack/coolify-template-test.sh [IMAGE]
@@ -169,8 +169,8 @@ offenders() { jq -r "$1" <<<"${rendered}" | paste -sd, -; }
 echo "no ports, no container_name, a healthcheck each, named volumes only."
 
 steve_image=$(jq -r '.services.steve.image // ""' <<<"${source_json}")
-[[ "${steve_image}" =~ ^ghcr\.io/juherr/steve:steve-[0-9]+\.[0-9]+\.[0-9]+@sha256:[0-9a-f]{64}$ ]] \
-  || fail "steve image '${steve_image}' is not a published tag pinned by its index digest"
+[[ "${steve_image}" =~ ^ghcr\.io/juherr/steve:steve-[0-9]+\.[0-9]+\.[0-9]+(@sha256:[0-9a-f]{64})?$ ]] \
+  || fail "steve image '${steve_image}' is not a steve-X.Y.Z tag of ghcr.io/juherr/steve"
 echo "image: ${steve_image}"
 # The pin moves only if Renovate reads the file, and the manager reads it only
 # through the path renovate.json adds; hack/renovate-extract-check.sh proves
