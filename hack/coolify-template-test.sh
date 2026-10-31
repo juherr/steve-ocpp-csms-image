@@ -176,8 +176,9 @@ echo "image: ${steve_image}"
 # through the path renovate.json adds; hack/renovate-extract-check.sh proves
 # the extraction, this that the path still names the template.
 managed=$(jq -r '."docker-compose".managerFilePatterns // [] | map(ltrimstr("/") | rtrimstr("/")) | join("|")' "${root}/renovate.json")
-[ -n "${managed}" ] && grep -qE "${managed}" <<<"${template#"${root}/"}" \
-  || fail "renovate.json's docker-compose manager does not read ${template#"${root}/"}: its pins would freeze"
+if [ -z "${managed}" ] || ! grep -qE "${managed}" <<<"${template#"${root}/"}"; then
+  fail "renovate.json's docker-compose manager does not read ${template#"${root}/"}: its pins would freeze"
+fi
 [ -n "$(jq -r '.services.steve.mem_limit // ""' <<<"${rendered}")" ] \
   || fail "steve has no mem_limit: its heap would be sized from the whole server"
 

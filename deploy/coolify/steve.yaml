@@ -2,7 +2,7 @@
 # slogan: SteVe, the open-source OCPP Central System for EV charging stations.
 # category: automation
 # tags: ocpp, ev, charging, csms, emobility
-# logo: svgs/steve.png
+# logo: svgs/steve.svg
 # port: 8180
 
 # Coolify one-click template — see README.md next to this file. It stays plain
