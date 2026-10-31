@@ -117,13 +117,15 @@ header "the magic variables"
 # Compose lists what it interpolates; a bare `- SERVICE_URL_X_PORT` entry is
 # passed through rather than interpolated, so it is read from the source form
 # of the environment — a list of K=V strings or a map, whichever was written.
-source_json=$(docker compose "${files[@]}" config --no-interpolate --format json)
+source_json=$(docker compose "${files[@]}" config --no-interpolate --format json) \
+  || fail "Compose cannot read the template (its error is above)"
 environment() {
   jq -r --arg s "$1" '.services[$s].environment // {}
     | if type == "array" then map(capture("^(?<k>[^=]+)(?<eq>=?)(?<v>.*)$")
         | {key: .k, value: (if .eq == "" then null else .v end)}) | from_entries else . end' <<<"${source_json}"
 }
-variables=$(docker compose "${files[@]}" config --variables --format json)
+variables=$(docker compose "${files[@]}" config --variables --format json) \
+  || fail "Compose cannot list the template's variables"
 bare=$(jq -r '.services[].environment // {}
   | if type == "array" then .[] | select(contains("=") | not) else to_entries[] | select(.value == null) | .key end' <<<"${source_json}")
 names=$( { jq -r 'keys[]' <<<"${variables}"; printf '%s\n' "${bare}"; } | grep . | sort -u)
@@ -153,7 +155,8 @@ done
 header "what the template declares"
 grep -qE '^name:' "${template}" && fail "a top-level name: would be shared by every installation"
 grep -qE '^networks:' "${template}" && fail "a top-level networks: is Coolify's to provide"
-rendered=$(compose "${projects[0]}" config --format json)
+rendered=$(compose "${projects[0]}" config --format json) \
+  || fail "Compose cannot render the template with generated values"
 offenders() { jq -r "$1" <<<"${rendered}" | paste -sd, -; }
 [ -z "$(offenders '.services | to_entries[] | select(.value.ports) | .key')" ] \
   || fail "publishes ports: $(offenders '.services | to_entries[] | select(.value.ports) | .key')"
