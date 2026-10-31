@@ -1,0 +1,71 @@
+# documentation: https://github.com/juherr/steve-ocpp-csms-image/blob/main/deploy/coolify/README.md
+# slogan: SteVe, the open-source OCPP Central System for EV charging stations.
+# category: automation
+# tags: ocpp, ev, charging, csms, emobility
+# logo: svgs/steve.png
+# port: 8180
+
+# Coolify one-click template — see README.md next to this file. It stays plain
+# Compose, so hack/coolify-template-test.sh runs it as it is: no ports, no
+# container or project name, no network, no bind mount — Coolify supplies a
+# per-resource network and name, and prefixes the volume, so that two
+# installations on one server do not meet.
+
+services:
+  steve:
+    # Tag and index digest; Renovate's docker datasource moves both, and only
+    # once the tag is published.
+    image: ghcr.io/juherr/steve:steve-3.14.1@sha256:5985fbdef33d891689b621d8601892c095de162222f0840b1f675ca89e714fe7
+    environment:
+      # Coolify routes the generated domain to the container's 8180.
+      - SERVICE_URL_STEVE_8180
+      - DB_IP=steve-db
+      - DB_PASSWORD=${SERVICE_PASSWORD_MARIADB}
+      - AUTH_USER=${SERVICE_USER_ADMIN}
+      - AUTH_PASSWORD=${SERVICE_PASSWORD_ADMIN}
+      # Upstream blocks the Web API while its secret is empty. Pinned empty,
+      # like the line below, against an upstream default change.
+      - WEBAPI_VALUE=
+      - AUTO_REGISTER_UNKNOWN_STATIONS=false
+      # Coolify's proxy terminates TLS; without the forwarded scheme SteVe
+      # refuses security-profile-2 stations, which require wss://.
+      - STEVE_OCPP_SECURITY_PROTOCOL_HEADER_FROM_PROXY=X-Forwarded-Proto
+    # The heap is 85 % of this limit; with none it is 85 % of the server,
+    # for every instance on it.
+    mem_limit: ${STEVE_MEMORY_LIMIT:-1g}
+    depends_on:
+      steve-db:
+        condition: service_healthy
+    healthcheck:
+      # 127.0.0.1 and not localhost: Jetty binds IPv4, localhost may resolve
+      # to ::1 first.
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:8180/steve/manager/signin"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      # First boot runs the Flyway migrations against an empty database.
+      start_period: 150s
+
+  steve-db:
+    image: mariadb:11.8
+    environment:
+      # UTC is mandatory: SteVe requires the database and application time
+      # zones to be aligned.
+      - TZ=+00:00
+      - MARIADB_ROOT_PASSWORD=${SERVICE_PASSWORD_ROOT}
+      - MARIADB_DATABASE=stevedb
+      - MARIADB_USER=steve
+      - MARIADB_PASSWORD=${SERVICE_PASSWORD_MARIADB}
+    volumes:
+      - steve-mariadb-data:/var/lib/mysql
+    # Time for InnoDB to shut down cleanly before Docker kills it.
+    stop_grace_period: 1m
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      start_period: 30s
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  steve-mariadb-data:
