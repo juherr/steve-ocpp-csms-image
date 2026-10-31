@@ -22,7 +22,7 @@
         "mariadb"
       ],
       "allowedVersions": "<12",
-      "description": "Stay on the MariaDB LTS track for the throwaway build database, matching what most SteVe deployments actually run"
+      "description": "Stay on the MariaDB LTS track for the throwaway build database and the Coolify template, matching what most SteVe deployments actually run"
     },
     {
       "matchDepNames": [
@@ -30,8 +30,21 @@
       ],
       "versioning": "regex:^steve-(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)$",
       "description": "Upstream prefixes its release tags. Declared once here rather than per manager: the Dockerfile pin and the documentation examples are extracted separately but describe the same tag format"
+    },
+    {
+      "matchPackageNames": [
+        "ghcr.io/juherr/steve"
+      ],
+      "versioning": "regex:^steve-(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)$",
+      "description": "The published image, read from the registry rather than from upstream's releases: the Coolify template pins a tag and its index digest, and both can only move once the tag exists. Same tag format as the upstream release it packages"
     }
   ],
+  "docker-compose": {
+    "description": "The Coolify template is a Compose file under a name the manager's default pattern does not match, `*compose*.yaml`",
+    "managerFilePatterns": [
+      "/^deploy/coolify/.+\\.ya?ml$/"
+    ]
+  },
   "customManagers": [
     {
       "customType": "regex",

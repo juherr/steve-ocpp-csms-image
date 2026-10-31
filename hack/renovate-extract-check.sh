@@ -8,7 +8,9 @@
 # with the tree: every `# renovate:` comment in a tracked file must be inside
 # a replaceString of that file, and every documentation file — Markdown, and
 # the Kubernetes example manifests — must yield as many SteVe-tag dependencies
-# as it has literals in the shapes renovate.json declares. The shapes and the
+# as it has literals in the shapes renovate.json declares, and every image line
+# of a Compose file renovate.json adds to the docker-compose manager — the
+# Coolify template — must be extracted, its digest with it. The shapes and the
 # files they apply to are read from renovate.json, not copied here.
 #
 # Usage:  ./hack/renovate-extract-check.sh    (from anywhere in the repository)
@@ -90,5 +92,34 @@ done < <(jq -r '.customManagers[] | select(.depNameTemplate != null)
   | [.depNameTemplate,
      ([.managerFilePatterns[] | ltrimstr("/") | rtrimstr("/")] | join("|")),
      (.matchStrings | join("|"))] | join("\t")' renovate.json)
+
+# --- Compose files renovate.json adds: every image line, digest included --
+#
+# The built-in docker-compose manager reads the Coolify template only because
+# renovate.json adds its path to the manager's default pattern. Every image
+# line of such a file must come back as a dependency whose replaceString is
+# the reference written, and a reference pinned by digest with its
+# currentDigest — without it Renovate would move the tag and leave the digest,
+# which is the one Docker resolves.
+
+patterns=$(jq -r '."docker-compose".managerFilePatterns // [] | map(ltrimstr("/") | rtrimstr("/")) | join("|")' renovate.json)
+if [ -n "${patterns}" ]; then
+  for file in $(git ls-files | grep -E "${patterns}" || true); do
+    images=0 images_ok=0
+    while read -r ref; do
+      images=$((images + 1))
+      dep=$(jq -c --arg f "${file}" --arg r "${ref}" \
+        'first(."docker-compose"[]? | select(.packageFile == $f) | .deps[] | select(.replaceString == $r)) // empty' <<<"${extracted}")
+      if [ -z "${dep}" ]; then
+        refuse "${file}: image not extracted: ${ref}"
+      elif [[ "${ref}" == *@sha256:* ]] && [ "$(jq -r '.currentDigest // ""' <<<"${dep}")" != "${ref##*@}" ]; then
+        refuse "${file}: image extracted without its digest: ${ref}"
+      else
+        images_ok=$((images_ok + 1))
+      fi
+    done < <(sed -nE "s/^[[:space:]]*image:[[:space:]]*[\"']?([^\"'[:space:]]+).*/\1/p" "${file}")
+    echo "${file}: ${images_ok} of ${images} images extracted"
+  done
+fi
 
 exit "${failed}"

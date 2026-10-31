@@ -172,6 +172,12 @@ steve_image=$(jq -r '.services.steve.image // ""' <<<"${source_json}")
 [[ "${steve_image}" =~ ^ghcr\.io/juherr/steve:steve-[0-9]+\.[0-9]+\.[0-9]+@sha256:[0-9a-f]{64}$ ]] \
   || fail "steve image '${steve_image}' is not a published tag pinned by its index digest"
 echo "image: ${steve_image}"
+# The pin moves only if Renovate reads the file, and the manager reads it only
+# through the path renovate.json adds; hack/renovate-extract-check.sh proves
+# the extraction, this that the path still names the template.
+managed=$(jq -r '."docker-compose".managerFilePatterns // [] | map(ltrimstr("/") | rtrimstr("/")) | join("|")' "${root}/renovate.json")
+[ -n "${managed}" ] && grep -qE "${managed}" <<<"${template#"${root}/"}" \
+  || fail "renovate.json's docker-compose manager does not read ${template#"${root}/"}: its pins would freeze"
 [ -n "$(jq -r '.services.steve.mem_limit // ""' <<<"${rendered}")" ] \
   || fail "steve has no mem_limit: its heap would be sized from the whole server"
 
