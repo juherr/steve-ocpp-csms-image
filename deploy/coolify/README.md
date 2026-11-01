@@ -142,6 +142,13 @@ it would be Traefik labels whose behaviour under Coolify has not been
 measured here, and the right one depends on where your charge points connect
 from.
 
+**A policy enforced in front of Coolify holds only if Coolify cannot be
+reached around it.** With a CDN or an identity-aware proxy ahead of the
+server, a client that connects to the server's own address with the right
+`Host` header meets Coolify's proxy directly, and no policy at all. Close
+that path: accept 80/443 on the server only from the front proxy's address
+ranges, or reach Coolify through a tunnel and publish nothing.
+
 The exemption opens that prefix and nothing behind it. Encoded traversal sent
 through it at the UI or the SOAP endpoint — `..;`, `%2F`, `%2f`, `%2e%2e`,
 `%5C`, `//`, `;jsessionid` — never reached them: SteVe's Jetty rejects an
@@ -206,6 +213,11 @@ drops the tables it contains, so tables a later migration added would
 survive into the restored schema.
 
 ## Updating
+
+An instance keeps the Compose file it was created from: a later change to
+this template — a new tag, a variable, a fix — reaches an existing instance
+only when you carry it into that instance's Compose file yourself (Coolify's
+*Update a service*, linked below, says the same of its own catalog).
 
 Change the tag on the `image:` line and redeploy. The new image brings its
 Flyway migrations and applies the ones the database has not seen before SteVe
@@ -288,6 +300,9 @@ Record the Coolify version, then:
 - [ ] The access policy chosen for the UI, exempting
       `/websocket/CentralSystemService/`, stops an outside browser on
       `/manager/` and `/services/` and lets the charge point through.
+- [ ] The policy cannot be gone around: a request to the server's own
+      address with the instance's `Host` header gets no answer, or not
+      SteVe's.
 - [ ] A second instance, created from the template, runs next to the first:
       different volume, network and credentials; a charge point added to one
       is absent from the other; deleting one leaves the other running.
