@@ -21,12 +21,13 @@
 # reached the second.
 #
 # The sign-in is the real form flow, `_csrf` included, from inside the
-# container: nothing is published, by design. The upstream behaviour asserted
-# below was measured on steve-3.14.1: the generated administrator lands on
-# /steve/, the default one on signin?error; with WEBAPI_VALUE empty the
-# administrator has no API password, so /steve/api/ answers 401 to Basic auth
-# even with the UI password; an unknown charge point's WebSocket upgrade
-# answers 404.
+# container: nothing is published, by design. The template serves SteVe at
+# the root of its domain (CONTEXT_PATH empty), so every path below has no
+# /steve prefix. The upstream behaviour asserted was measured on steve-3.14.1:
+# the generated administrator lands on /, the default one on signin?error;
+# with WEBAPI_VALUE empty the administrator has no API password, so /api/
+# answers 401 to Basic auth even with the UI password; a registered charge
+# point's WebSocket upgrade answers 101, an unknown one's 404.
 #
 # Given no IMAGE, the template runs as written — the tag Renovate moves is
 # pulled and booted on the pull request that moves it. Given one, it
@@ -195,6 +196,12 @@ expect "${steve_env}" AUTH_PASSWORD '^\$\{SERVICE_PASSWORD_[A-Z0-9]+\}$'
 expect "${steve_env}" DB_PASSWORD '^\$\{SERVICE_PASSWORD_[A-Z0-9]+\}$'
 expect "${steve_env}" WEBAPI_VALUE '^$'
 expect "${steve_env}" AUTO_REGISTER_UNKNOWN_STATIONS '^false$'
+expect "${steve_env}" CONTEXT_PATH '^$'
+# At the root, the old /steve/manager/signin answers a redirect, which
+# `curl -f` counts as healthy: a healthcheck left on it would never fail.
+health=$(jq -r '.services.steve.healthcheck.test | join(" ")' <<<"${rendered}")
+[[ " ${health} " == *" http://127.0.0.1:8180/manager/signin "* ]] \
+  || fail "steve's healthcheck '${health}' does not probe http://127.0.0.1:8180/manager/signin"
 expect "${db_env}" MARIADB_PASSWORD '^\$\{SERVICE_PASSWORD_[A-Z0-9]+\}$'
 expect "${db_env}" MARIADB_ROOT_PASSWORD '^\$\{SERVICE_PASSWORD_[A-Z0-9]+\}$'
 [ "$(jq -r .DB_PASSWORD <<<"${steve_env}")" = "$(jq -r .MARIADB_PASSWORD <<<"${db_env}")" ] \
@@ -202,6 +209,7 @@ expect "${db_env}" MARIADB_ROOT_PASSWORD '^\$\{SERVICE_PASSWORD_[A-Z0-9]+\}$'
 distinct=$( { jq -r '.AUTH_PASSWORD, .DB_PASSWORD' <<<"${steve_env}"; jq -r .MARIADB_ROOT_PASSWORD <<<"${db_env}"; } | sort -u | wc -l)
 [ "${distinct}" -eq 3 ] || fail "the administrator, database and root passwords must be three variables"
 echo "every credential generated; administrator, database and root distinct; Web API secret empty."
+echo "served at the root; healthcheck on /manager/signin."
 
 header "two installations"
 started=1
@@ -222,7 +230,7 @@ admin_password=$(jq -r '.AUTH_PASSWORD | ltrimstr("${") | rtrimstr("}")' <<<"${s
 # the status of the home page with that session.
 # shellcheck disable=SC2016 # expanded by the container shell
 signin_script='
-base=http://127.0.0.1:8180/steve/manager jar=$(mktemp)
+base=http://127.0.0.1:8180/manager jar=$(mktemp)
 csrf=$(curl -sS -c "$jar" -b "$jar" "$base/signin" | sed -n "s/.*name=\"_csrf\" value=\"\([^\"]*\)\".*/\1/p")
 [ -n "$csrf" ] || { echo "no-csrf"; exit 0; }
 curl -sS -o /dev/null -c "$jar" -b "$jar" -w "%{redirect_url} " --data-urlencode "username=$1" \
@@ -230,9 +238,17 @@ curl -sS -o /dev/null -c "$jar" -b "$jar" -w "%{redirect_url} " --data-urlencode
 curl -sS -o /dev/null -b "$jar" -w "%{http_code}" "$base/home"
 rm -f "$jar"'
 signin() { compose "$1" exec -T steve sh -c "${signin_script}" sh "$2" "$3"; }
-signed_in() { [[ "$(signin "$@")" =~ ^http://127\.0\.0\.1:8180/steve/\ 200$ ]]; }
+signed_in() { [[ "$(signin "$@")" =~ ^http://127\.0\.0\.1:8180/\ 200$ ]]; }
 refused() { [[ "$(signin "$@")" =~ signin\?error\ 302$ ]]; }
 in_container() { compose "$1" exec -T steve curl -sS -o /dev/null -w '%{http_code}' "${@:2}"; }
+# upgrade PROJECT CHARGE_BOX_ID: the status of an OCPP 1.6 WebSocket upgrade.
+# An accepted one stays open until --max-time, and curl then exits 28 having
+# printed 101, hence the `|| true`; an empty answer is still a mismatch.
+upgrade() {
+  in_container "$1" --max-time 5 -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Sec-WebSocket-Version: 13' \
+    -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' -H 'Sec-WebSocket-Protocol: ocpp1.6' \
+    "http://127.0.0.1:8180/websocket/CentralSystemService/$2" 2>/dev/null || true
+}
 # shellcheck disable=SC2016 # expanded by the container shell
 sql() { compose "$1" exec -T steve-db sh -c 'MYSQL_PWD="$MARIADB_PASSWORD" mariadb -N -u steve stevedb -e "$1"' sh "$2"; }
 
@@ -251,14 +267,15 @@ for p in "${projects[@]}"; do
     || fail "${p}: the generated administrator does not sign in ($(signin "${p}" "$(value "${p}" "${admin_user}")" "$(value "${p}" "${admin_password}")"))"
   refused "${p}" admin 1234 || fail "${p}: the upstream default admin/1234 is not refused"
   echo "the generated administrator signs in; admin/1234 is refused."
-  code=$(in_container "${p}" -u "$(value "${p}" "${admin_user}"):$(value "${p}" "${admin_password}")" http://127.0.0.1:8180/steve/api/v1/ocppTags)
+  code=$(in_container "${p}" -u "$(value "${p}" "${admin_user}"):$(value "${p}" "${admin_password}")" http://127.0.0.1:8180/api/v1/ocppTags)
   [ "${code}" = 401 ] || fail "${p}: the Web API answered ${code} to the administrator, expected 401"
   echo "Web API refused (401)."
-  code=$(in_container "${p}" --max-time 10 -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Sec-WebSocket-Version: 13' \
-    -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' -H 'Sec-WebSocket-Protocol: ocpp1.6' \
-    "http://127.0.0.1:8180/steve/websocket/CentralSystemService/${run}")
-  [ "${code}" = 404 ] || fail "${p}: an unknown charge point's upgrade answered ${code}, expected 404"
-  echo "unknown charge point refused (404)."
+  code=$(upgrade "${p}" "${run}-unknown")
+  [ "${code}" = 404 ] || fail "${p}: an unknown charge point's upgrade answered '${code}', expected 404"
+  sql "${p}" "INSERT INTO charge_box (charge_box_id) VALUES ('${run}-cp')"
+  code=$(upgrade "${p}" "${run}-cp")
+  [ "${code}" = 101 ] || fail "${p}: a registered charge point's upgrade answered '${code}', expected 101"
+  echo "a registered charge point connects (101); an unknown one is refused (404)."
 done
 
 header "isolation"

@@ -4,6 +4,7 @@
 # tags: ocpp, ev, charging, csms, emobility
 # logo: svgs/steve.svg
 # port: 8180
+# minversion: 4.4.6
 
 # Coolify one-click template — see README.md next to this file. It stays plain
 # Compose, so hack/coolify-template-test.sh runs it as it is: no ports, no
@@ -20,6 +21,11 @@ services:
     environment:
       # Coolify routes the generated domain to the container's 8180.
       - SERVICE_URL_STEVE_8180
+      # SteVe at the root of that domain rather than under /steve: an
+      # instance owns its domain, and the prefix would only lengthen every
+      # URL a charge point is configured with. Upstream builds the context
+      # path as /${context.path}, so empty is /.
+      - CONTEXT_PATH=
       - DB_IP=steve-db
       - DB_PASSWORD=${SERVICE_PASSWORD_MARIADB}
       - AUTH_USER=${SERVICE_USER_ADMIN}
@@ -39,8 +45,10 @@ services:
         condition: service_healthy
     healthcheck:
       # 127.0.0.1 and not localhost: Jetty binds IPv4, localhost may resolve
-      # to ::1 first.
-      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:8180/steve/manager/signin"]
+      # to ::1 first. The path follows CONTEXT_PATH: the old
+      # /steve/manager/signin answers a redirect, which curl -f counts as
+      # healthy, so a stale path would never fail.
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:8180/manager/signin"]
       interval: 30s
       timeout: 5s
       retries: 3
