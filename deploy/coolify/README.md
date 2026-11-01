@@ -27,9 +27,8 @@ The image is the one line that names a release: the `image:` of the `steve`
 service, `ghcr.io/juherr/steve:steve-X.Y.Z`. It is a tag without a digest on
 purpose: a JRE update republishes the same tag (see
 [*Tags*](../../README.md#tags)), and the template is meant to take it on the
-next pull of the image rather than through a change to the file. Whether a
-plain redeploy in Coolify pulls again or keeps the image the server already
-holds is on the checklist below. Pin it by digest yourself if you would
+next pull of the image rather than through a change to the file — see
+*Updating* for the action that pulls. Pin it by digest yourself if you would
 rather review that change: append the index digest `docker buildx imagetools
 inspect` prints, `…:steve-X.Y.Z@sha256:<digest>`.
 
@@ -118,7 +117,11 @@ What protects each:
   its Basic credentials. A charge point cannot pass an interactive login, so
   nothing stronger can be put in front of it.
 - **The SOAP endpoint** — nothing: SteVe serves `/services/` without
-  authentication (it answers 200 here, measured), as OCPP-S stations expect.
+  authentication (it answers 200 here, measured), as OCPP-S stations expect,
+  and the template cannot turn it off. **Whether or not you have SOAP
+  stations, `/services/` is the one path no credential protects**: keep it
+  behind the access policy below, and if SOAP stations must reach it, reach
+  it only from where they are.
 - **The Web API** (`/api/`) — off. Upstream enables it per user, with an
   API password the administrator receives from `WEBAPI_VALUE` on the first
   start; the template pins it empty, so the administrator has none and every
@@ -127,8 +130,9 @@ What protects each:
   has Coolify generate the secret — before the first deploy, or afterwards
   followed by the administrator reset under *Generated credentials*.
 
-So a public domain exposes a sign-in page and two machine endpoints. To keep
-the UI off the internet, put an access policy in front of the domain — an IP
+So a public domain exposes a sign-in page, an endpoint authenticated per
+charge point, and one not authenticated at all. To keep the UI and the SOAP
+endpoint off the internet, put an access policy in front of the domain — an IP
 allow-list, a VPN-only domain, an authenticating proxy — and **exempt the
 path `/websocket/CentralSystemService/`, trailing slash included**: a
 policy that stops at the WebSocket path without it, or a Basic-auth
@@ -161,10 +165,21 @@ what they add. MariaDB has no limit and sizes itself.
 ## Backup and restore
 
 All state is the MariaDB data directory, in the `steve-mariadb-data` volume,
-named `<resource-uuid>_steve-mariadb-data` on the server (measured). A copy of a running data
-directory is not a consistent backup; a logical dump is. From the `steve-db`
-container — Coolify's **Terminal**, or a **Scheduled Task** on that container
-for a recurring one:
+named `<resource-uuid>_steve-mariadb-data` on the server (measured). A copy
+of a running data directory is not a consistent backup; a logical dump is.
+
+**Coolify's own scheduled backups first.** Coolify recognises a MariaDB image
+inside a Service as a database component and offers it the scheduled,
+engine-aware backups of its standalone databases, uploaded to S3-compatible
+storage if you configure one; for MariaDB it reads `MARIADB_ROOT_PASSWORD`
+and `MARIADB_DATABASE` from the container, which the template sets
+([Coolify: Back up a database inside a service](https://coolify.io/docs/databases/backups)).
+That is Coolify's documentation, not yet run on this template — it is on the
+checklist, restore included: a backup is only proven by restoring it.
+
+**A dump by hand**, the fallback and the way to a file you hold yourself.
+From the `steve-db` container — Coolify's **Terminal**, or a **Scheduled
+Task** on that container for a recurring one:
 
 ```bash
 MYSQL_PWD="$MARIADB_PASSWORD" mariadb-dump --single-transaction --routines --events -u steve stevedb > /tmp/steve-backup.sql
@@ -199,6 +214,16 @@ starts; a redeploy of the same tag is a no-op for Flyway. Take a dump first:
 migrated schema is not a supported path — the way back is the dump. The main
 README's [*Upgrading*](../../README.md#upgrading) and
 [*Downgrading*](../../README.md#downgrading) hold the details.
+
+**A republished tag** — the same `steve-X.Y.Z` with a new JRE — needs the
+image pulled again, which is not what a restart does. Coolify's **Advanced →
+Pull Latest Images & Restart** runs a Compose pull of the tags the Service
+holds and recreates the stack
+([Coolify: Update a service](https://coolify.io/docs/services/operations/update-service));
+whether a plain **Deploy** pulls too is on the checklist. That is the trade a
+tag without a digest makes: the instance follows republications of its tag
+when you pull, without a change to the file — and without one to review. With
+a digest on the `image:` line it changes only when you edit that line.
 
 Two SteVe containers must never run against one database: the charge points'
 WebSocket sessions live in one SteVe process, and a migration run by a new
@@ -267,17 +292,19 @@ Record the Coolify version, then:
       different volume, network and credentials; a charge point added to one
       is absent from the other; deleting one leaves the other running.
 - [ ] Clone: whether the clone's generated values equal the original's.
-- [ ] A dump taken, restored into the instance, and the data back after
-      sign-in.
-- [ ] Whether Coolify offers its scheduled database backups for a MariaDB
-      defined inside a service, or only the scheduled-task dump above.
+- [ ] Coolify's scheduled backup of `steve-db`: offered, **Back up now**
+      succeeds, and the file restores — into a throwaway instance — with the
+      data back after sign-in.
+- [ ] The dump by hand: taken, restored into the instance, the data back
+      after sign-in.
 - [x] `STEVE_MEMORY_LIMIT` is honoured: `docker inspect` of the `steve`
       container shows the limit.
 - [ ] A redeploy on a new tag: whether the old `steve` container is stopped
       before the new one starts, and the `Migrating schema` lines in the new
       one's log.
-- [ ] A redeploy on the same tag: whether Coolify pulls the image again (a
-      republished tag reaches the instance) or reuses the one on the server.
+- [ ] The same tag again: whether a plain **Deploy** pulls the image or
+      reuses the one on the server, and that **Pull Latest Images & Restart**
+      does pull (the image id of the new `steve` container).
 - [ ] The administrator reset under *Generated credentials*: a new
       `SERVICE_PASSWORD_ADMIN`, the row deleted, `steve` restarted, the new
       password signs in.

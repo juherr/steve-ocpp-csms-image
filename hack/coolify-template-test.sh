@@ -112,7 +112,13 @@ for key in documentation slogan category tags logo port; do
 done
 port=$(sed -n 's/^# port: *//p' "${template}")
 [[ "${port}" =~ ^[0-9]+$ ]] || fail "'# port: ${port}' is not a port"
-echo "documentation, slogan, category, tags, logo, port (${port})."
+# Coolify's catalog generator reads every line matching ^#(key):(value) as
+# metadata, wherever it sits (Generate/Services.php in coollabsio/coolify):
+# a comment starting at column 0 with a colon in it is a key, not a comment.
+metadata=$(grep -E '^#.*:' "${template}" || true)
+stray=$(grep -vE '^# (documentation|slogan|category|tags|logo|port|minversion|env_file|ignore|amd_only|arm_only): ' <<<"${metadata}" || true)
+[ -z "${stray}" ] || fail "a column-0 comment with a colon is catalog metadata to Coolify: ${stray%%$'\n'*}"
+echo "documentation, slogan, category, tags, logo, port (${port}); no stray metadata."
 
 header "the magic variables"
 # Compose lists what it interpolates; a bare `- SERVICE_URL_X_PORT` entry is
