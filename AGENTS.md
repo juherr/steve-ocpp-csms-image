@@ -448,7 +448,9 @@ port, container name, project name, network or bind mount, a `mem_limit`,
 the path `renovate.json` reads it through), then brings up two installations
 side by side and checks, in each, the migration, no host port, the generated
 administrator signing in where `admin`/`1234` and the other installation's do
-not, the Web API refused and an unknown charge point refused, then restarts
+not, the Web API refused, a registered charge point's WebSocket upgrade
+accepted and an unknown one's refused — at the root paths, the template
+serving SteVe at the root of its domain — then restarts
 one and finds its data and nothing of it in the other. It runs in
 `coolify-template.yml`, on a change to the template, the script or
 `renovate.json`, against the tag the template names — the published image, so

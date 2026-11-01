@@ -71,25 +71,45 @@ variable, so that the two agree.
 
 ## Management UI and OCPP endpoints
 
-With the domain Coolify routes to the service:
+The template serves SteVe at the root of the domain Coolify routes to it
+(`CONTEXT_PATH=` empty), not under the `/steve` prefix the image uses by
+default: an instance owns its domain, and the prefix would only lengthen
+every URL a charge point is configured with. So:
 
-- the management UI is `https://<domain>/steve/manager`;
+- the management UI is `https://<domain>/manager` — `https://<domain>/`
+  redirects there;
 - a charge point connects to
-  `wss://<domain>/steve/websocket/CentralSystemService/<chargeBoxId>`,
-  `<chargeBoxId>` being the identity registered for it in SteVe first —
-  unknown identities are refused with a 404 (measured).
+  `wss://<domain>/websocket/CentralSystemService/<chargeBoxId>`,
+  `<chargeBoxId>` being the identity registered for it in SteVe first — a
+  registered one gets its upgrade (101), an unknown one a 404 (measured);
+- OCPP-S (SOAP) stations use `https://<domain>/services/CentralSystemServiceOCPP16`
+  (or `…OCPP15`). The WSDL SteVe serves names the request's host but
+  `http://` behind the proxy (measured), so configure the station with the
+  `https://` URL rather than the one the WSDL advertises.
 
 TLS is terminated by Coolify's proxy, which forwards the WebSocket upgrade to
 the container's `8180`; SteVe itself speaks plain HTTP. For charge points
 using OCPP security profile 2 — Basic authentication, which requires TLS —
 SteVe has to know the connection was TLS before the proxy: the template sets
 `STEVE_OCPP_SECURITY_PROTOCOL_HEADER_FROM_PROXY=X-Forwarded-Proto` for that.
+On a real Coolify, profile 2 over `wss://` is accepted (101) and a plain
+`ws://` is redirected to `https://` by the proxy; an `X-Forwarded-Proto: http`
+forged by the client does not reach SteVe — the proxy sets the header itself
+(measured, Coolify 4.4.6 behind Cloudflare).
+
+**Keep the connection alive from the charge point.** A proxy in front of
+Coolify may close an idle WebSocket: behind Cloudflare the session was cut
+before 150 s without traffic, and SteVe sent no WebSocket ping in that time
+(measured). Set the station's `WebSocketPingInterval` below the proxy's idle
+timeout — 60 s or less behind Cloudflare, with which a Heartbeat 160 s after
+the BootNotification was still answered (measured). Stations that do not
+implement it need a Heartbeat interval below that timeout instead.
 
 ## Security
 
 The management UI, the OCPP WebSocket endpoint and SteVe's SOAP endpoint
-(`/steve/services/`) share the container's single port, and so the one
-domain. What protects each:
+(`/services/`) share the container's single port, and so the one domain.
+What protects each:
 
 - **The management UI** — SteVe's sign-in, with the generated administrator.
   It is reachable from wherever the domain is.
@@ -97,9 +117,9 @@ domain. What protects each:
   registered (`AUTO_REGISTER_UNKNOWN_STATIONS=false`), and, for profile 2,
   its Basic credentials. A charge point cannot pass an interactive login, so
   nothing stronger can be put in front of it.
-- **The SOAP endpoint** — nothing: SteVe serves `/steve/services/` without
+- **The SOAP endpoint** — nothing: SteVe serves `/services/` without
   authentication (it answers 200 here, measured), as OCPP-S stations expect.
-- **The Web API** (`/steve/api/`) — off. Upstream enables it per user, with an
+- **The Web API** (`/api/`) — off. Upstream enables it per user, with an
   API password the administrator receives from `WEBAPI_VALUE` on the first
   start; the template pins it empty, so the administrator has none and every
   call answers 401, even with the UI password (measured). To use it, edit
@@ -110,13 +130,21 @@ domain. What protects each:
 So a public domain exposes a sign-in page and two machine endpoints. To keep
 the UI off the internet, put an access policy in front of the domain — an IP
 allow-list, a VPN-only domain, an authenticating proxy — and **exempt the
-path `/steve/websocket/CentralSystemService/`, trailing slash included**: a
+path `/websocket/CentralSystemService/`, trailing slash included**: a
 policy that stops at the WebSocket path without it, or a Basic-auth
 middleware over the whole domain, takes the charge points' own
 `Authorization` header and locks them out. The template ships no such policy:
 it would be Traefik labels whose behaviour under Coolify has not been
 measured here, and the right one depends on where your charge points connect
 from.
+
+The exemption opens that prefix and nothing behind it. Encoded traversal sent
+through it at the UI or the SOAP endpoint — `..;`, `%2F`, `%2f`, `%2e%2e`,
+`%5C`, `//`, `;jsessionid` — never reached them: SteVe's Jetty rejects an
+ambiguous path with a 400 (`Ambiguous URI path parameter`), and what it did
+not reject the proxy had normalised before the access policy applied, which
+then sent it to sign-in (measured, an identity-aware policy on Coolify 4.4.6
+behind Cloudflare; the image's prefix at the time, the same Jetty).
 
 ## Memory
 
@@ -132,8 +160,8 @@ what they add. MariaDB has no limit and sizes itself.
 
 ## Backup and restore
 
-All state is the MariaDB data directory, in the `steve-mariadb-data` volume
-(Coolify prefixes it with the resource's id). A copy of a running data
+All state is the MariaDB data directory, in the `steve-mariadb-data` volume,
+named `<resource-uuid>_steve-mariadb-data` on the server (measured). A copy of a running data
 directory is not a consistent backup; a logical dump is. From the `steve-db`
 container — Coolify's **Terminal**, or a **Scheduled Task** on that container
 for a recurring one:
@@ -206,7 +234,8 @@ port, container name, project name, network or bind mount — then brings up
 two installations side by side and checks, in each: the migration of the empty
 database, no host port bound, the generated administrator signing in where
 `admin`/`1234` and the other installation's administrator do not, the Web API
-refused, an unknown charge point refused. Then it restarts one, keeping its
+refused, a registered charge point's WebSocket upgrade accepted and an
+unknown one's refused — all at the root paths. Then it restarts one, keeping its
 volume, and checks that the schema is up to date, that a row written before
 is still there and that it never reached the other one.
 
@@ -218,27 +247,31 @@ Coolify.
 
 Record the Coolify version, then:
 
-- [ ] The template parses: both services shown, the variables of *Generated
+- [x] The template parses: both services shown, the variables of *Generated
       credentials* generated.
-- [ ] The UI answers on `https://<domain>/steve/manager` and the generated
+- [ ] The UI answers on `https://<domain>/manager` and the generated
       administrator signs in; `admin`/`1234` does not.
 - [ ] A simulated charge point — for instance
       [`ghcr.io/shiv3/ocpp-cp-simulator`](https://github.com/shiv3/ocpp-cp-simulator)
-      — registered in SteVe, connects over `wss://` and its BootNotification
-      and Heartbeat show in SteVe.
-- [ ] The same charge point in security profile 2 (Basic credentials over
+      — registered in SteVe, connects over
+      `wss://<domain>/websocket/CentralSystemService/<id>` and its
+      BootNotification and Heartbeat show in SteVe.
+- [x] The same charge point in security profile 2 (Basic credentials over
       `wss://`) is accepted — the proof that
       `STEVE_OCPP_SECURITY_PROTOCOL_HEADER_FROM_PROXY` reaches SteVe under
       that name.
-- [ ] The access policy chosen for the UI stops an outside browser and lets
-      the charge point through.
+- [ ] The access policy chosen for the UI, exempting
+      `/websocket/CentralSystemService/`, stops an outside browser on
+      `/manager/` and `/services/` and lets the charge point through.
 - [ ] A second instance, created from the template, runs next to the first:
       different volume, network and credentials; a charge point added to one
       is absent from the other; deleting one leaves the other running.
 - [ ] Clone: whether the clone's generated values equal the original's.
 - [ ] A dump taken, restored into the instance, and the data back after
       sign-in.
-- [ ] `STEVE_MEMORY_LIMIT` is honoured: `docker inspect` of the `steve`
+- [ ] Whether Coolify offers its scheduled database backups for a MariaDB
+      defined inside a service, or only the scheduled-task dump above.
+- [x] `STEVE_MEMORY_LIMIT` is honoured: `docker inspect` of the `steve`
       container shows the limit.
 - [ ] A redeploy on a new tag: whether the old `steve` container is stopped
       before the new one starts, and the `Migrating schema` lines in the new
@@ -253,7 +286,47 @@ Results, and any Coolify limitation found on the way, go below.
 
 ### Results
 
-Not run yet.
+**Coolify 4.4.6, behind Cloudflare, an identity-aware access policy on the
+domain** — first run, on the template as it stood before it moved SteVe to
+the root of its domain, so every path below carried `/steve`. The items
+ticked above do not depend on that path; the ones left open that do (UI,
+`wss://`, the policy's exemption) were met under `/steve` and are to run again
+at the root.
+
+- Created by hand, **+ New → Docker Compose Empty**, the file pasted
+  unchanged, a domain on port `8180`: both services created, the generated
+  administrator signs in.
+- First boot: `Successfully applied 12 migrations to schema stevedb, now at
+  version v1.1.6`, both containers `healthy`, no restart. The baseline's
+  `DROP … IF EXISTS` logs `Unknown table` warnings on an empty schema; they
+  are harmless.
+- No published port (`PortBindings {}`), a per-resource network; the volume
+  is `<resource-uuid>_steve-mariadb-data`.
+- `mem_limit`: `1073741824` on `steve`, `0` on `steve-db`.
+- A simulated charge point over `wss://`: BootNotification `Accepted`
+  (interval 14400), Heartbeat answered; SteVe sends `GetConfiguration` on
+  connect.
+- WebSocket handshakes through the proxy:
+
+  | Case | Result |
+  | --- | --- |
+  | Unknown identity | 404 |
+  | Profile 1, no Basic or a wrong one | 401 |
+  | Profile 1, the right Basic | 101 |
+  | Profile 2, a wrong Basic | 401 |
+  | Profile 2, the right Basic over `wss://` | 101 |
+  | Profile 2, the right Basic and a forged `X-Forwarded-Proto: http` | 101 — the client's header does not reach SteVe |
+  | Plain `ws://` | 301 to `https://`, from the proxy |
+
+- The access policy stopped an outside browser on the UI and the SOAP
+  endpoint and let the charge point through; encoded traversal through the
+  exempted prefix did not get past it (see *Security*).
+- An idle WebSocket was cut before 150 s behind Cloudflare; a client ping
+  every 60 s kept it (see *Management UI and OCPP endpoints*).
+
+Not run yet: `admin`/`1234` on the real instance, the second instance, Clone,
+dump and restore, Coolify's scheduled backups, the two redeploys, the
+administrator reset — and the root paths, above.
 
 ## Catalog
 
@@ -270,9 +343,9 @@ The header comments are the metadata Coolify's catalog reads — `documentation`
   ([steve-community/steve](https://github.com/steve-community/steve), over
   1,100), not this image's repository.
 - A submission also needs a documentation page in
-  [coollabsio/coolify-docs](https://github.com/coollabsio/coolify-docs), and
-  a `# minversion:` line, which waits for the Coolify version the checklist
-  above passes on.
+  [coollabsio/coolify-docs](https://github.com/coollabsio/coolify-docs). The
+  header's `# minversion: 4.4.6` is the version the checklist above was run
+  on, not a measured lower bound.
 - The logo the header names, `svgs/steve.svg`, is a file of the catalog's
   repository, added with the submission: it is [`steve.svg`](steve.svg) here,
   the SteVe mark. Upstream ships its logo as PNGs in the web application and
