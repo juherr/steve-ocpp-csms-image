@@ -24,8 +24,9 @@ setup_fixtures
 
 # The tree the fixture entry describes: one docs literal of each managed
 # shape, the Dockerfile ARG, a workflow pin by tag and one by tag@digest,
-# and the image line of a Kubernetes
-# example manifest — every manager renovate.json declares, exercised once. The
+# the image line of a Kubernetes example manifest, and the two image lines of
+# the Coolify template, one by tag@digest and one quoted — every manager
+# renovate.json declares or extends, exercised once. The
 # comment marker is spelled through a variable: the check reads every tracked
 # file, this one included, and would otherwise count these fixtures as pins of
 # a shell script no manager reads.
@@ -58,6 +59,14 @@ containers:
   - name: steve
     image: ghcr.io/juherr/steve:steve-1.0.1
 EOF
+mkdir -p "${repo}/deploy/coolify"
+cat >"${repo}/deploy/coolify/steve.yaml" <<'EOF'
+services:
+  steve:
+    image: ghcr.io/juherr/steve:steve-1.0.1@sha256:1111111111111111111111111111111111111111111111111111111111111111
+  steve-db:
+    image: "mariadb:11.8"
+EOF
 git -C "${repo}" add -A
 git -C "${repo}" -c user.name=test -c user.email=test@example.invalid commit -q -m 'the tree the extraction describes'
 # The saved entry is kept indented for the sake of its diffs; Renovate writes
@@ -70,7 +79,7 @@ export RENOVATE_EXTRACT="${work}/extract.log"
 
 run 'every pin of the fixture tree is extracted' "${check}"
 expect_status 0 && expect_out 'README.md: 3 of 3' && expect_out 'examples/kubernetes/deployment.yaml: 1 of 1' \
-  && expect_out "${r} comments: 4 of 4" && pass
+  && expect_out "${r} comments: 4 of 4" && expect_out 'deploy/coolify/steve.yaml: 2 of 2 images extracted' && pass
 
 # The script is documented as runnable by hand, and a hand runs it from
 # wherever the shell is: the tree it checks and the workflow it reads the
@@ -112,6 +121,25 @@ printf '    # was ghcr.io/juherr/steve:steve-1.0.1\n' >>"${repo}/examples/kubern
 run 'a manifest literal missing from the extraction fails, naming the file' "${check}"
 expect_status 1 && expect_err 'examples/kubernetes/deployment.yaml: 2 SteVe tag literals, 1 extracted' && pass
 cp "${work}/deployment.yaml.orig" "${repo}/examples/kubernetes/deployment.yaml"
+
+# --- a Compose image Renovate no longer extracts --------------------------
+#
+# The Coolify template is read by the built-in docker-compose manager, only
+# because renovate.json adds its path. An image line the entry does not hold
+# is unmanaged; a digest the entry dropped would let Renovate move the tag
+# and leave the digest Docker actually resolves.
+
+compose_file="${repo}/deploy/coolify/steve.yaml"
+cp "${compose_file}" "${work}/steve.yaml.orig"
+printf '  cache:\n    image: redis:7\n' >>"${compose_file}"
+run 'a Compose image missing from the extraction fails, naming it' "${check}"
+expect_status 1 && expect_err 'deploy/coolify/steve.yaml: image not extracted: redis:7' && pass
+cp "${work}/steve.yaml.orig" "${compose_file}"
+
+jq -c '(.packageFiles["docker-compose"][]?.deps[]? | select(.depName == "ghcr.io/juherr/steve")) |= del(.currentDigest)' \
+  "${work}/extract.log" >"${work}/no-digest.log"
+run 'a Compose image extracted without its digest fails' env RENOVATE_EXTRACT="${work}/no-digest.log" "${check}"
+expect_status 1 && expect_err 'deploy/coolify/steve.yaml: image extracted without its digest: ghcr.io/juherr/steve:steve-1.0.1@sha256:' && pass
 
 # --- a `# renovate:` comment Renovate no longer reads ---------------------
 

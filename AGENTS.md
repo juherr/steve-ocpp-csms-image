@@ -25,21 +25,24 @@ this repository — if something must change in SteVe, it changes upstream.
 | `.github/workflows/release.yml` | The release, from the Actions tab: preflight, fast-forward `release`, start the build |
 | `.github/workflows/release-drift.yml` | Schedules `hack/release-drift.sh` — see that script for what it compares |
 | `.github/workflows/check-links.yml` | Schedules `hack/check-links.sh` weekly, report-only: a broken link is a warning and a step summary, never a red run |
+| `.github/workflows/coolify-template.yml` | Runs `hack/coolify-template-test.sh` on a change to the Coolify template, its test or `renovate.json` — against the published tag the template names, no build |
 | `hack/release-drift.sh` | Published image vs the `release` branch; runnable by hand |
 | `hack/release-preflight.sh` | Would releasing HEAD publish anything, or only move a digest; runnable by hand |
 | `hack/migration-test.sh` | Fresh-database migration, restart and upgrade scenarios against the built image; what CI runs after the build, runnable by hand |
 | `hack/k8s-example-test.sh` | Applies `examples/kubernetes/` to a throwaway kind cluster, reads back what the Deployment declares (replicas, `Recreate`, security context, probe paths) and checks a pod comes up under it with the Secret reaching it; run by the amd64 build job on the image it built, runnable by hand against the published tag |
+| `hack/coolify-template-test.sh` | Brings `deploy/coolify/steve.yaml` up twice side by side with plain Compose standing in for Coolify — generated `SERVICE_*` values, a project per installation — after checking what the file declares; sign-in, Web API, isolation and restart with the data kept; runnable by hand |
 | `hack/image-config.sh` | Image config of a published tag, single manifest or index; what `release-drift.sh`, `release-preflight.sh`, the three scripts below, the build workflow and the `CLAUDE.md` recipe read through |
 | `hack/scan-targets.sh` | The images `scan-published.yml` scans: one (tag, arch) per supported platform each of the newest tags carries; runnable by hand |
 | `hack/check-pushed-digest.sh` | Is the digest a build job pushed the image it probed; run by each build job on `release` |
 | `hack/publish-index.sh` | Checks the two platform digests and the index they would form, then makes the tag — the index annotated with the manifests' `description`, which is where GHCR reads a multi-arch package's description — and prints the digest to pin; run by the `publish` job on `release` |
 | `hack/mirror-tag.sh` | Copies a published tag from GHCR to Docker Hub as it is — `crane copy`, same index digest on both — and reads it back; run by the `mirror` job on `release`, runnable by hand with a Docker Hub token |
-| `hack/renovate-extract-check.sh` | Is every pin one Renovate extracts — the `# renovate:` comments, the Markdown examples and the example manifests; run by `lint.yml`, runnable by hand |
+| `hack/renovate-extract-check.sh` | Is every pin one Renovate extracts — the `# renovate:` comments, the Markdown examples, the example manifests and the Coolify template's images; run by `lint.yml`, runnable by hand |
 | `hack/lint.sh` | The steps of `lint.yml`, run locally — read out of the workflow, pins and commands, not copied from it |
 | `hack/check-links.sh` | lychee over every tracked Markdown file and `NOTICE`; what `check-links.yml` runs, runnable by hand |
 | `hack/test/` | Offline tests of the six scripts above that read the registry, against a fixture registry served by a `curl` shim and a `docker` that records instead of acting, of the mirror against a `docker` shim that answers crane's four commands from that registry, of the Renovate check against a saved extraction, of the README's `MaxRAMPercentage` against `entrypoint.sh`, of `hack/lint.sh` against a fixture workflow, and of `hack/check-links.sh` against a `docker` shim that replays lychee's exit codes — plus the step of `check-links.yml` that maps them to a verdict, run as written through `hack/lint.sh` |
 | `README.md` | User-facing documentation |
 | `examples/kubernetes/` | Reference `Deployment` + `Service` and their README — an example, not a chart; schema-checked by kubeconform in `lint.yml`, brought up in kind by `hack/k8s-example-test.sh` on every build |
+| `deploy/coolify/` | Coolify one-click service template — SteVe, MariaDB, credentials from Coolify's `SERVICE_*` variables — and its README: install, security, backup, updates, the manual checklist on a real Coolify, catalog notes; brought up twice by `hack/coolify-template-test.sh` |
 | `.github/assets/` | Images referenced by `README.md`; outside the build context |
 | `NOTICE` | License aggregation of the produced image — must stay accurate |
 | `renovate.json` | Dependency pinning automation |
@@ -124,6 +127,23 @@ preset lists `**/examples/**` — so `renovate.json` restates `ignorePaths`
 without it. Measured, not read: the manager matched the file and Renovate
 still extracted nothing until the override, which is the case
 `hack/renovate-extract-check.sh` exists to catch.
+
+The Coolify template, `deploy/coolify/steve.yaml`, names the tag too and is
+deliberately *not* read by that manager: its `image:` is what a one-click
+install runs, so it must never name a tag that is not published yet, which
+is what moving with `ARG STEVE_REF` would do between the merge and the
+release. Renovate's built-in docker-compose manager reads it instead — the
+path is added in `renovate.json`, the manager's default pattern only matches
+`*compose*.yaml` — with the docker datasource on GHCR and the
+`steve-X.Y.Z` versioning a `packageRule` gives `ghcr.io/juherr/steve`, so the
+template moves in a PR of its own once the next tag exists (measured with a
+lookup run on an older published tag). It names the tag without a digest, a
+choice for the template's users: a republished tag is meant to be taken on
+the next pull — whether a Coolify redeploy pulls is on the manual checklist.
+Its README says how to pin a digest, and the template test and the
+extraction check accept one. Keep `deploy/coolify/README.md` free of tag literals: as a
+Markdown file it is the Markdown manager's, and would move ahead of the
+template it describes.
 
 This file and `CLAUDE.md` read the tag out of the pin instead —
 `$(sed -n 's/^ARG STEVE_REF=//p' Dockerfile)`. Their reader has the repository
@@ -363,14 +383,17 @@ Renovate's own image on the working directory — `--platform=local
 no branch, no PR, nothing written — and fails when a `# renovate:` comment is
 not inside a `replaceString` of its file, or a Markdown file or example
 manifest holds more SteVe tag literals in the shapes `renovate.json` declares
-than Renovate extracted from it. `lint.yml` runs it on every pull request, so a
+than Renovate extracted from it, or an `image:` line of a file the
+docker-compose manager is pointed at — the Coolify template — was not
+extracted, or was extracted without the digest it carries. `lint.yml` runs it on every pull request, so a
 README edit that leaves a shape is red before it lands — and so was the
 preset that ignored `examples/`, on the first run against the manifest; the
 Renovate image is ~450 MB
 (measured), the one pull in that workflow that is not seconds. A pin that
 the check does not name is unmanaged, whatever the comment next to it says —
 the Dockerfile `FROM` lines and the action SHAs are the built-in managers'
-and are not counted. For which version each pin would move to, run Renovate
+and are not counted; the Coolify template's image lines are, because the
+built-in manager reads that file only through the path `renovate.json` adds. For which version each pin would move to, run Renovate
 itself without `--dry-run=extract`: `--platform=local` then falls back to
 its `dryRun=lookup` default, which queries the datasources — that one hits
 github.com, so prefix it with `RENOVATE_GITHUB_COM_TOKEN="$(gh auth token)"`
@@ -415,6 +438,33 @@ after, the `Migrating schema` lines in the new pod's log — and stays a hand
 check until it proves necessary in CI. On Apple Silicon a tag from before the
 multi-arch build runs emulated in kind — ~130 s to ready, measured — which is
 what the `startupProbe` budget is sized for.
+
+The Coolify template is proven by `hack/coolify-template-test.sh`, and not by
+reading it either. Plain Compose stands in for Coolify — the template is kept
+plain Compose so that it can — with a generated value for every `SERVICE_*`
+variable it references and a project name per installation. The script checks
+the file (catalog header, variable families, every credential generated, no
+port, container name, project name, network or bind mount, a `mem_limit`,
+the path `renovate.json` reads it through), then brings up two installations
+side by side and checks, in each, the migration, no host port, the generated
+administrator signing in where `admin`/`1234` and the other installation's do
+not, the Web API refused, a registered charge point's WebSocket upgrade
+accepted and an unknown one's refused — at the root paths, the template
+serving SteVe at the root of its domain — then restarts
+one and finds its data and nothing of it in the other. It runs in
+`coolify-template.yml`, on a change to the template, the script or
+`renovate.json`, against the tag the template names — the published image, so
+a Renovate move of that tag is booted on its own PR, and no image is built. A
+change to the template or the script is red-before-green: each rule above was
+broken in the template and failed on its own message before it passed. What
+plain Compose cannot stand in for — Coolify's parser, its proxy, TLS and
+WebSockets through it, Clone — is the checklist in `deploy/coolify/README.md`,
+run by hand on a real Coolify; its results are recorded there.
+
+```bash
+./hack/coolify-template-test.sh                # the tag the template names
+./hack/coolify-template-test.sh steve:local    # an image from the daemon
+```
 
 Build locally with the block under **Building locally** in `README.md`. It is
 one copy of those commands on purpose: the README claims they are exactly what
