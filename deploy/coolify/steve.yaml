@@ -10,7 +10,11 @@
 # Compose, so hack/coolify-template-test.sh runs it as it is. No ports, no
 # container or project name, no network, no bind mount — Coolify supplies a
 # per-resource network and name, and prefixes the volume, so that two
-# installations on one server do not meet.
+# installations on one server keep their network, volume, database and
+# credentials apart. Not everything is apart. They share the server's proxy,
+# through which a container on the server reaches any installation's routes
+# (measured on Coolify 4.5.3), and the server's image tags, so a pull for one
+# moves the image the others restart on (inferred). See README.md.
 #
 # minversion above is the only Coolify version this revision of the template
 # has run on, not a measured lower bound. Coolify's catalog generator reads
