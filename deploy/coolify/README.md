@@ -115,9 +115,12 @@ under `/steve`, replayed at the root on 4.5.3). The redirect is the
 Coolify may close an idle WebSocket: behind Cloudflare the session was cut
 before 150 s without traffic, and SteVe sent no WebSocket ping in that time
 (measured). Set the station's `WebSocketPingInterval` below the proxy's idle
-timeout — 60 s or less behind Cloudflare, with which a Heartbeat 160 s after
-the BootNotification was still answered (measured). Stations that do not
-implement it need a Heartbeat interval below that timeout instead.
+timeout — behind Cloudflare, 60 s kept a session to a Heartbeat 156 s after
+the BootNotification (measured, Coolify 4.5.3; 60 s is the one value tried,
+not a threshold). It is set on each charge point. Stations that do not
+implement it need a Heartbeat interval below that timeout instead, and
+SteVe answers the BootNotification with `interval: 14400` (measured): that
+setting has to change in each instance.
 
 ## Security
 
@@ -153,9 +156,10 @@ path `/websocket/CentralSystemService/`, trailing slash included**: a
 policy that stops at the WebSocket path without it, or a Basic-auth
 middleware over the whole domain, takes the charge points' own
 `Authorization` header and locks them out. The template ships no such policy:
-it would be Traefik labels whose behaviour under Coolify has not been
-measured here, and the right one depends on where your charge points connect
-from.
+the right one depends on where your charge points connect from, and a
+Traefik label in the template reaches the whole domain, not a path (see the
+rate limit below). A policy is per domain, so plan one at each instance's
+creation, the exemption included.
 
 **A policy enforced in front of Coolify holds only if Coolify cannot be
 reached around it.** With a CDN or an identity-aware proxy ahead of the
@@ -163,16 +167,36 @@ server, a client that connects to the server's own address with the right
 `Host` header meets Coolify's proxy directly, and no policy at all. Close
 that path: accept 80/443 on the server only from the front proxy's address
 ranges, or reach Coolify through a tunnel and publish nothing. That closes
-the outside; it does not close the path from a container on the server to
-another instance, through the same proxy (see *Several instances*).
+the outside, a generated route left next to an added domain included; it
+does not close the path from a container on the server to another instance,
+through the same proxy (see *Several instances*). A policy that trusts a
+client-address header the front proxy adds holds only once the origin is
+closed: sent straight to the server, such a header is taken as it is
+(measured).
+
+**Nothing limits the OCPP handshake.** An unknown identity gets a 404 and a
+known one without its credentials a 401 (measured), so identities can be
+enumerated, and each attempt on a known one costs SteVe a bcrypt check
+(read; the cost not measured). Put a rate limit at the edge or in the
+proxy's dynamic configuration, not in the template; neither was tried here.
+A `traefik.http.middlewares.*` label in the template is attached by Coolify
+to the domain's router, so a limit meant for the handshake limited the UI
+too (429 after 12 requests, another address spared; measured, Coolify
+4.5.3). `${…}` names stay literal in such labels by default, and
+`COOLIFY_RESOURCE_UUID` is empty there without escaping; a path-scoped limit
+only held with per-instance literals and a regex trick — not something to
+ship.
 
 The exemption opens that prefix and nothing behind it. Encoded traversal sent
 through it at the UI or the SOAP endpoint — `..;`, `%2F`, `%2f`, `%2e%2e`,
 `%5C`, `//`, `;jsessionid` — never reached them: SteVe's Jetty rejects an
 ambiguous path with a 400 (`Ambiguous URI path parameter`), and what it did
 not reject the proxy had normalised before the access policy applied, which
-then sent it to sign-in (measured, an identity-aware policy on Coolify 4.4.6
-behind Cloudflare; the image's prefix at the time, the same Jetty).
+then sent it to sign-in. At the root, on Coolify 4.5.3 behind Cloudflare
+with an identity-aware policy, 68 variants climbing from the exempted
+prefix: 36 answered 400, 32 were redirected to the policy, none got a 200
+or any UI or SOAP content (measured; first measured on 4.4.6 under the
+image's `/steve` prefix, the same Jetty).
 
 ## Memory
 
@@ -243,7 +267,10 @@ it restored into a second instance — 31 tables, schema `v1.1.6`, data and
 sign-in back (measured, Coolify 4.5.3). It is set per instance: a new
 instance has no schedule until someone sets one, and Coolify's API answers
 `Database not found` for that database's backups, so check each instance in
-the UI. **Back up now** was not run.
+the UI. A **Clone** copies the original's schedule (read, Coolify 4.5.3's
+code), and deleting an instance deletes its volume (measured, through the
+API with `delete_volumes=true`, its default): take the backup before.
+**Back up now** was not run.
 
 **A dump by hand**, the way to a file you hold yourself, and the one to take
 just before an update. It has to land outside the container. On the server,
@@ -396,7 +423,14 @@ perimeter its own server; no remedy within one server has been measured.
 Create the second one **from the template, as a new resource** — not with
 **Clone**. Cloning copies the environment variables, the generated passwords
 included, so the clone starts with the same administrator and database
-password as the original. If you do clone, regenerate the `SERVICE_PASSWORD_*`
+password as the original: its `SERVICE_USER_*` and `SERVICE_PASSWORD_*`
+equal the original's, its URL and volume are its own, it is not started,
+and once started it boots empty and the original's credentials sign in
+(measured, Coolify 4.5.3, through Coolify's clone code rather than the UI
+button). It also copies the backup schedule (read, not measured). A new
+instance from the template gets its own access policy, its own backup
+schedule and its own updates — none of them follows from the first. If you
+do clone, regenerate the `SERVICE_PASSWORD_*`
 and `SERVICE_USER_*` values *before* its first deploy: once it has started,
 they no longer change anything (see *Generated credentials*).
 
@@ -527,8 +561,9 @@ The header comments are the metadata Coolify's catalog reads — `documentation`
   1,100), not this image's repository.
 - A submission also needs a documentation page in
   [coollabsio/coolify-docs](https://github.com/coollabsio/coolify-docs). The
-  header's `# minversion: 4.4.6` is the version the checklist above was run
-  on, not a measured lower bound.
+  header's `# minversion: 4.5.3` is the only Coolify version this revision
+  of the template has run on — 4.4.6 only ran the one under `/steve` — not
+  a measured lower bound.
 - The logo the header names, `svgs/steve.svg`, is a file of the catalog's
   repository, added with the submission: it is [`steve.svg`](steve.svg) here,
   the SteVe mark. Upstream ships its logo as PNGs in the web application and
