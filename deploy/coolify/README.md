@@ -442,14 +442,21 @@ template names. Plain Compose stands in for Coolify: the script generates a
 value for each `SERVICE_*` variable the template references, the way Coolify
 does, and gives each installation its own project name. It checks the file —
 the catalog header, the variable families, every credential generated, no
-port, container name, project name, network or bind mount — then brings up
-two installations side by side and checks, in each: the migration of the empty
-database, no host port bound, the generated administrator signing in where
-`admin`/`1234` and the other installation's administrator do not, the Web API
-refused, a registered charge point's WebSocket upgrade accepted and an
-unknown one's refused — all at the root paths. Then it restarts one, keeping its
+port, container name, project name, network or bind mount, MariaDB pinned to
+a patch release — then brings up two installations side by side and checks,
+in each: the migration of the empty database, no host port bound, the
+generated administrator signing in where `admin`/`1234` and the other
+installation's administrator do not, the Web API refused, a registered
+charge point's WebSocket upgrade accepted and an unknown one's refused, a
+profile 2 one accepted behind `X-Forwarded-Proto: https` and refused
+without it — all at the root paths. Then it restarts one, keeping its
 volume, and checks that the schema is up to date, that a row written before
-is still there and that it never reached the other one.
+is still there and that it never reached the other one. On that one it then
+replays this README's commands: the dump, to a file outside the container;
+the administrator reset; the restore of that file, after which the dump's
+rows and administrator are back. On the other it kills `steve-db` and starts
+it again under a running `steve`, which must sign in and accept a charge
+point without having been restarted.
 
 What plain Compose cannot stand in for — Coolify's parser, its proxy, TLS,
 WebSockets through it, Clone — is the checklist below, run by hand on a real

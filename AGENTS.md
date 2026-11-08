@@ -30,7 +30,7 @@ this repository — if something must change in SteVe, it changes upstream.
 | `hack/release-preflight.sh` | Would releasing HEAD publish anything, or only move a digest; runnable by hand |
 | `hack/migration-test.sh` | Fresh-database migration, restart and upgrade scenarios against the built image; what CI runs after the build, runnable by hand |
 | `hack/k8s-example-test.sh` | Applies `examples/kubernetes/` to a throwaway kind cluster, reads back what the Deployment declares (replicas, `Recreate`, security context, probe paths) and checks a pod comes up under it with the Secret reaching it; run by the amd64 build job on the image it built, runnable by hand against the published tag |
-| `hack/coolify-template-test.sh` | Brings `deploy/coolify/steve.yaml` up twice side by side with plain Compose standing in for Coolify — generated `SERVICE_*` values, a project per installation — after checking what the file declares; sign-in, Web API, isolation and restart with the data kept; runnable by hand |
+| `hack/coolify-template-test.sh` | Brings `deploy/coolify/steve.yaml` up twice side by side with plain Compose standing in for Coolify — generated `SERVICE_*` values, a project per installation — after checking what the file declares; sign-in, Web API, the profile 2 binding, isolation, restart with the data kept, the README's dump (kept outside the container), administrator reset and restore, and the loss of `steve-db` under a running `steve`; runnable by hand |
 | `hack/image-config.sh` | Image config of a published tag, single manifest or index; what `release-drift.sh`, `release-preflight.sh`, the three scripts below, the build workflow and the `CLAUDE.md` recipe read through |
 | `hack/scan-targets.sh` | The images `scan-published.yml` scans: one (tag, arch) per supported platform each of the newest tags carries; runnable by hand |
 | `hack/check-pushed-digest.sh` | Is the digest a build job pushed the image it probed; run by each build job on `release` |
@@ -139,7 +139,12 @@ path is added in `renovate.json`, the manager's default pattern only matches
 template moves in a PR of its own once the next tag exists (measured with a
 lookup run on an older published tag). It names the tag without a digest, a
 choice for the template's users: a republished tag is meant to be taken on
-the next pull — whether a Coolify redeploy pulls is on the manual checklist.
+the next pull, which **Deploy**, **Pull Latest Images & Restart** and the
+API's `/restart?latest=true` make and a plain restart does not (the API
+measured, the buttons read in Coolify 4.5.3's code). The pull moves the
+server's copy of the tag, so every installation on that server takes it at
+its next restart — which is why MariaDB, the other image, is pinned to a
+patch: its moves come as pull requests the template test boots.
 Its README says how to pin a digest, and the template test and the
 extraction check accept one. Keep `deploy/coolify/README.md` free of tag literals: as a
 Markdown file it is the Markdown manager's, and would move ahead of the
@@ -445,13 +450,21 @@ plain Compose so that it can — with a generated value for every `SERVICE_*`
 variable it references and a project name per installation. The script checks
 the file (catalog header, variable families, every credential generated, no
 port, container name, project name, network or bind mount, a `mem_limit`,
-the path `renovate.json` reads it through), then brings up two installations
-side by side and checks, in each, the migration, no host port, the generated
-administrator signing in where `admin`/`1234` and the other installation's do
-not, the Web API refused, a registered charge point's WebSocket upgrade
-accepted and an unknown one's refused — at the root paths, the template
-serving SteVe at the root of its domain — then restarts
-one and finds its data and nothing of it in the other. It runs in
+MariaDB pinned to a patch, the path `renovate.json` reads it through), then
+brings up two installations side by side and checks, in each, the
+migration, no host port, the generated administrator signing in where
+`admin`/`1234` and the other installation's do not, the Web API refused, a
+registered charge point's WebSocket upgrade accepted and an unknown one's
+refused, a profile 2 one accepted behind `X-Forwarded-Proto: https` and
+refused without it — the proof that the template's header variable reaches
+SteVe under that name — at the root paths, the template serving SteVe at
+the root of its domain — then restarts one and finds its data and nothing
+of it in the other. On that one it replays the README's dump, to a file
+outside the container as Coolify's actions destroy it, the administrator
+reset and the restore; on the other it kills `steve-db` and starts it again
+under a running `steve`, which must sign in and accept a charge point
+without a restart — its healthcheck reads a page that needs no database, so
+`healthy` alone would prove nothing there. It runs in
 `coolify-template.yml`, on a change to the template, the script or
 `renovate.json`, against the tag the template names — the published image, so
 a Renovate move of that tag is booted on its own PR, and no image is built. A
