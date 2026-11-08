@@ -461,9 +461,9 @@ Record the Coolify version, then:
 
 - [x] The template parses: both services shown, the variables of *Generated
       credentials* generated.
-- [ ] The UI answers on `https://<domain>/manager` and the generated
+- [x] The UI answers on `https://<domain>/manager` and the generated
       administrator signs in; `admin`/`1234` does not.
-- [ ] A simulated charge point — for instance
+- [x] A simulated charge point — for instance
       [`ghcr.io/shiv3/ocpp-cp-simulator`](https://github.com/shiv3/ocpp-cp-simulator)
       — registered in SteVe, connects over
       `wss://<domain>/websocket/CentralSystemService/<id>` and its
@@ -472,30 +472,35 @@ Record the Coolify version, then:
       `wss://`) is accepted — the proof that
       `STEVE_OCPP_SECURITY_PROTOCOL_HEADER_FROM_PROXY` reaches SteVe under
       that name.
-- [ ] The access policy chosen for the UI, exempting
+- [x] The access policy chosen for the UI, exempting
       `/websocket/CentralSystemService/`, stops an outside browser on
       `/manager/` and `/services/` and lets the charge point through.
-- [ ] The policy cannot be gone around: a request to the server's own
-      address with the instance's `Host` header gets no answer, or not
-      SteVe's.
-- [ ] A second instance, created from the template, runs next to the first:
+- [x] The policy cannot be gone around from outside: a request to the
+      server's own address with the instance's `Host` header gets no
+      answer, or not SteVe's.
+- [ ] The policy cannot be gone around from a container on the server: it
+      can, through the shared proxy — a known limit (see *Several
+      instances*).
+- [x] A second instance, created from the template, runs next to the first:
       different volume, network and credentials; a charge point added to one
       is absent from the other; deleting one leaves the other running.
-- [ ] Clone: whether the clone's generated values equal the original's.
-- [ ] Coolify's scheduled backup of `steve-db`: offered, **Back up now**
-      succeeds, and the file restores — into a throwaway instance — with the
-      data back after sign-in.
-- [ ] The dump by hand: taken, restored into the instance, the data back
-      after sign-in.
-- [x] `STEVE_MEMORY_LIMIT` is honoured: `docker inspect` of the `steve`
-      container shows the limit.
-- [ ] A redeploy on a new tag: whether the old `steve` container is stopped
-      before the new one starts, and the `Migrating schema` lines in the new
+- [x] Clone: whether the clone's generated values equal the original's — they
+      do (through Coolify's clone code, not the UI button).
+- [x] Coolify's scheduled backup of `steve-db`: offered, set in the UI with an
+      S3-compatible target, a scheduled run succeeds, and the file restores —
+      into another instance — with the data back after sign-in.
+- [x] The dump by hand: taken, restored into the instance with `steve`
+      stopped alone, the data back after sign-in — and kept off the
+      container, which a restart destroys.
+- [x] The default `STEVE_MEMORY_LIMIT` is honoured: `docker inspect` of the
+      `steve` container shows the limit.
+- [x] A redeploy on a new tag: the old `steve` container is stopped before
+      the new one starts, and the `Migrating schema` lines are in the new
       one's log.
-- [ ] The same tag again: whether a plain **Deploy** pulls the image or
-      reuses the one on the server, and that **Pull Latest Images & Restart**
-      does pull (the image id of the new `steve` container).
-- [ ] The administrator reset under *Generated credentials*: a new
+- [x] The same tag again, through the API: `/restart` and `/stop` then
+      `/start` keep the image on the server, `/restart?latest=true` pulls
+      the registry's (the image id of the new `steve` container).
+- [x] The administrator reset under *Generated credentials*: a new
       `SERVICE_PASSWORD_ADMIN`, the row deleted, `steve` restarted, the new
       password signs in.
 
@@ -503,12 +508,67 @@ Results, and any Coolify limitation found on the way, go below.
 
 ### Results
 
+**Coolify 4.5.3, behind Cloudflare, an identity-aware access policy on the
+domain, SteVe at the root, the template at `4a42d02`** — a second instance
+created for the run, then deleted. Every box above was run here; the one
+left open is the limit the run found.
+
+- Parses: also created through `POST /services`; `SERVICE_USER_*` (16
+  characters) and `SERVICE_PASSWORD_*` (32) generated, distinct per
+  instance.
+- UI, sign-in: at the root, a person signed in through the access policy;
+  the form sign-in from inside the container; `admin`/`1234` refused on
+  both instances.
+- Simulated charge point at the root over `wss://`: BootNotification
+  `Accepted` (interval 14400); a Heartbeat answered 156 s later with a 60 s
+  client ping.
+- Profile 2, replayed at the root: the same 404/401/101 matrix as below, a
+  forged `X-Forwarded-Proto` ignored, `ws://` 301.
+- Access policy: `/`, `/manager`, `/services/…` and `/api/…` redirected to
+  the policy; the exempted prefix reaches SteVe; 68 traversal variants: 36 ×
+  400, 32 × redirect, none served.
+- Around the policy, from outside: the server's address with the
+  instance's `Host` times out (curl 28), from two networks. From a container
+  on the server: answered — another instance's sign-in and `/services/` 200
+  through the shared proxy, no edge policy; the open box above.
+- Second instance: its own network, volume and credentials; the other
+  database unreachable; a charge point added to one absent from the other
+  (101 / 404). Delete removed its containers, volume, network and
+  configuration; the first instance kept its id and start time.
+- Clone, through Coolify's clone code, not the UI button: `SERVICE_USER_*`
+  and `SERVICE_PASSWORD_*` equal the original's, the URL differs, its own
+  volume, not started; it boots empty and the same credentials sign in.
+- Scheduled backup, set in the UI with an S3-compatible target: a run
+  `success`, 49,199 bytes uploaded, the object's checksum equal to the local
+  copy; restored into a second instance: 31 tables, schema `v1.1.6`, data
+  and sign-in back. **Back up now** not recorded, and `GET
+  /databases/<service db uuid>/backups` answers `Database not found`.
+- Dump by hand: the commands work as written, the drop and create rights
+  included, restored with `steve` stopped alone; the file in `/tmp` was gone
+  after a restart, hence the dump off the container in *Backup and restore*.
+- `STEVE_MEMORY_LIMIT`: default only, `1073741824`. A non-default value has
+  not been run; the variable has no row in Coolify.
+- New tag, through the API, `PATCH` then `/restart`: `3.14.0` to `3.14.1`,
+  `Migrating schema … 1.1.6`, one migration, data kept, a 23.8 s outage.
+  The order read from probe and start times (the events were lost on this
+  run); the same path with full events on the same-tag runs.
+- Same tag: API `/restart` and `/stop` then `/start` keep a locally moved
+  tag; `?latest=true` restores the registry digest; the old `steve` dead
+  before the new one starts, about 22 s. UI **Deploy** and **Pull Latest**:
+  read in Coolify's code, not clicked.
+- Administrator reset: the variable alone, the old password signs in and the
+  new one is refused; the row deleted and a restart, the new one signs in,
+  the old one and `admin`/`1234` are refused.
+
+Not run yet: the UI **Deploy** and **Pull Latest** buttons (read in code),
+**Back up now**, Clone from the UI, a non-default `STEVE_MEMORY_LIMIT`,
+OCPP-S stations through the proxy, anything under load.
+
 **Coolify 4.4.6, behind Cloudflare, an identity-aware access policy on the
 domain** — first run, on the template as it stood before it moved SteVe to
 the root of its domain, so every path below carried `/steve`. The items
-ticked above do not depend on that path; the ones left open that do (UI,
-`wss://`, the policy's exemption) were met under `/steve` and are to run again
-at the root.
+that depend on that path (UI, `wss://`, the policy's exemption) were met
+under `/steve` and run again at the root on 4.5.3, above.
 
 - Created by hand, **+ New → Docker Compose Empty**, the file pasted
   unchanged, a domain on port `8180`: both services created, the generated
@@ -540,10 +600,6 @@ at the root.
   exempted prefix did not get past it (see *Security*).
 - An idle WebSocket was cut before 150 s behind Cloudflare; a client ping
   every 60 s kept it (see *Management UI and OCPP endpoints*).
-
-Not run yet: `admin`/`1234` on the real instance, the second instance, Clone,
-dump and restore, Coolify's scheduled backups, the two redeploys, the
-administrator reset — and the root paths, above.
 
 ## Catalog
 
