@@ -4,7 +4,7 @@
 # tags: ocpp, ev, charging, csms, emobility
 # logo: svgs/steve.svg
 # port: 8180
-# minversion: 4.4.6
+# minversion: 4.5.3
 
 # Coolify one-click template — see README.md next to this file. It stays plain
 # Compose, so hack/coolify-template-test.sh runs it as it is. No ports, no
@@ -12,10 +12,10 @@
 # per-resource network and name, and prefixes the volume, so that two
 # installations on one server do not meet.
 #
-# minversion above is the Coolify version the template was run on, not a
-# measured lower bound. Coolify's catalog generator reads every comment line
-# starting at column 0 with a colon in it as metadata, so comments up here
-# carry none.
+# minversion above is the only Coolify version this revision of the template
+# has run on, not a measured lower bound. Coolify's catalog generator reads
+# every comment line starting at column 0 with a colon in it as metadata, so
+# comments up here carry none.
 
 services:
   steve:
