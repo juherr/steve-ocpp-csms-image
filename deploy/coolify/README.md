@@ -266,7 +266,9 @@ Reset it afterwards if needed (see *Generated credentials*).
 An instance keeps the Compose file it was created from: a later change to
 this template — a new tag, a variable, a fix — reaches an existing instance
 only when you carry it into that instance's Compose file yourself (Coolify's
-*Update a service*, linked below, says the same of its own catalog).
+*Update a service*, linked below, says the same of its own catalog). There
+is no bulk carry-over: on a fleet, each instance's Compose file is changed
+and restarted on its own — by hand, or through Coolify's API, below.
 
 Change the tag on the `image:` line and redeploy. The new image brings its
 Flyway migrations and applies the ones the database has not seen before SteVe
@@ -280,23 +282,44 @@ back is that backup. The main
 README's [*Upgrading*](../../README.md#upgrading) and
 [*Downgrading*](../../README.md#downgrading) hold the details.
 
+What each action does to the image and the containers, on Coolify 4.5.3:
+
+| Action | Pulls the image | Stops the old containers | Status |
+| --- | --- | --- | --- |
+| API `/restart`, or `/stop` then `/start` | no | `docker stop --timeout=30`, then `rm -f` | measured |
+| API `/restart?latest=true` | yes | a Compose recreate, no overlap | measured |
+| UI **Restart** | no | as `/restart` | read in Coolify's code |
+| UI **Deploy** | yes | as `?latest=true` | read in Coolify's code |
+| UI **Advanced → Pull Latest Images & Restart** | yes | as `?latest=true` | read in Coolify's code |
+
+Through the API, an update is a `PATCH` of the service with its new Compose
+file, then `/restart` — or `/restart?latest=true` to pull as well. The
+`PATCH` left the instance's variables as they were, 13 of 13 (measured), and
+a `3.14.0` to `3.14.1` update went that way: one migration, data kept.
+
 **A republished tag** — the same `steve-X.Y.Z` with a new JRE — needs the
-image pulled again, which is not what a restart does. Coolify's **Advanced →
-Pull Latest Images & Restart** runs a Compose pull of the tags the Service
-holds and recreates the stack
-([Coolify: Update a service](https://coolify.io/docs/services/operations/update-service));
-whether a plain **Deploy** pulls too is on the checklist. That is the trade a
-tag without a digest makes: the instance follows republications of its tag
-when you pull, without a change to the file — and without one to review. With
-a digest on the `image:` line it changes only when you edit that line.
+image pulled again, which is not what a restart does: **Deploy**, **Pull
+Latest Images & Restart** or `?latest=true` pull it
+([Coolify: Update a service](https://coolify.io/docs/services/operations/update-service)).
+That is the trade a tag without a digest makes: the server follows
+republications of the tag when anything on it pulls, without a change to the
+file — and without one to review — and every instance on that tag takes the
+pulled image at its next restart (see *Several instances*). With a digest on
+the `image:` line it changes only when you edit that line.
 
 Two SteVe containers must never run against one database: the charge points'
 WebSocket sessions live in one SteVe process, and a migration run by a new
 container while the old one still serves changes the schema under it. Do not
 scale the `steve` service — Coolify refuses more than one replica in a
-template anyway — and treat an update as a short outage, not a rolling one.
-Whether Coolify stops the old container before it starts the new one on a
-redeploy is on the checklist below.
+template anyway. An update is an outage, not a rolling one: on both API
+paths measured, the old `steve` is gone before the new one starts, no
+overlap, and `steve-db` is stopped with it, less than 250 ms apart,
+database first, in no dependency order. Through the proxy the instance
+answered 200, then 502 while the containers went, then 404 — the proxy
+drops the route while `steve` is not healthy — then 200 again: 22 to 24 s
+in all (measured, Coolify 4.5.3, a nearly empty database, no load; a large
+migration lengthens it). A charge point reconnecting in that window sees
+502, then 404, the same status SteVe gives an unknown identity.
 
 ## Several instances
 
