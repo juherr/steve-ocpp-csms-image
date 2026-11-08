@@ -254,14 +254,23 @@ signin() { compose "$1" exec -T steve sh -c "${signin_script}" sh "$2" "$3"; }
 signed_in() { [[ "$(signin "$@")" =~ ^http://127\.0\.0\.1:8180/\ 200$ ]]; }
 refused() { [[ "$(signin "$@")" =~ signin\?error\ 302$ ]]; }
 in_container() { compose "$1" exec -T steve curl -sS -o /dev/null -w '%{http_code}' "${@:2}"; }
-# upgrade PROJECT CHARGE_BOX_ID: the status of an OCPP 1.6 WebSocket upgrade.
-# An accepted one stays open until --max-time, and curl then exits 28 having
-# printed 101, hence the `|| true`; an empty answer is still a mismatch.
+# upgrade PROJECT CHARGE_BOX_ID [CURL ARGS…]: the status of an OCPP 1.6
+# WebSocket upgrade. An accepted one stays open until --max-time, and curl
+# then exits 28 having printed 101, hence the `|| true`; an empty answer is
+# still a mismatch.
 upgrade() {
   in_container "$1" --max-time 5 -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Sec-WebSocket-Version: 13' \
-    -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' -H 'Sec-WebSocket-Protocol: ocpp1.6' \
+    -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' -H 'Sec-WebSocket-Protocol: ocpp1.6' "${@:3}" \
     "http://127.0.0.1:8180/websocket/CentralSystemService/$2" 2>/dev/null || true
 }
+# A charge point in security profile 2: SteVe stores the profile and a
+# bcrypt hash of its Basic password on charge_box (read, steve-3.14.1:
+# V1_1_1__ocpp16_security.sql, BCryptPasswordEncoder). The hash is of
+# p2_password, made once with `htpasswd -nbBC 10`; a throwaway database's
+# fixture, not a secret.
+p2_password=profile2-test-password
+# shellcheck disable=SC2016 # a bcrypt hash, not an expansion
+p2_hash='$2y$10$XaVpwp2o6N/Tr2RR0UhZz.pX2/77c5CaNNDQZeNZxugz70RGHW2Bu'
 # shellcheck disable=SC2016 # expanded by the container shell
 sql() { compose "$1" exec -T steve-db sh -c 'MYSQL_PWD="$MARIADB_PASSWORD" mariadb -N -u steve stevedb -e "$1"' sh "$2"; }
 
@@ -289,6 +298,18 @@ for p in "${projects[@]}"; do
   code=$(upgrade "${p}" "${run}-cp")
   [ "${code}" = 101 ] || fail "${p}: a registered charge point's upgrade answered '${code}', expected 101"
   echo "a registered charge point connects (101); an unknown one is refused (404)."
+  # Profile 2 is Basic over TLS, and the TLS is the proxy's: SteVe sees
+  # plain HTTP and refuses the station unless the template names the header
+  # carrying the original scheme. The proxy sets that header itself.
+  sql "${p}" "INSERT INTO charge_box (charge_box_id, security_profile, auth_password) VALUES ('${run}-p2', 2, '${p2_hash}')"
+  code=$(upgrade "${p}" "${run}-p2" -u "${run}-p2:${p2_password}")
+  [ "${code}" = 401 ] || fail "${p}: a profile-2 charge point over plain HTTP answered '${code}', expected 401"
+  code=$(upgrade "${p}" "${run}-p2" -u "${run}-p2:${p2_password}" -H 'X-Forwarded-Proto: https')
+  [ "${code}" = 101 ] \
+    || fail "${p}: a profile-2 charge point behind X-Forwarded-Proto: https answered '${code}', expected 101"
+  code=$(upgrade "${p}" "${run}-p2" -u "${run}-p2:wrong-${p2_password}" -H 'X-Forwarded-Proto: https')
+  [ "${code}" = 401 ] || fail "${p}: a profile-2 charge point with a wrong password answered '${code}', expected 401"
+  echo "profile 2: 101 behind X-Forwarded-Proto: https; 401 without it, 401 with a wrong password."
 done
 
 header "isolation"
