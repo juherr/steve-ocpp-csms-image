@@ -16,9 +16,11 @@
 # both healthy, the database migrated from empty, no host port bound, the
 # generated administrator signs in where the upstream default and the other
 # installation's administrator do not, the Web API refused, an unknown charge
-# point refused. Then a restart of the first one, `down` without `-v`: the
-# schema is up to date, a row written before is still there, and it never
-# reached the second.
+# point refused, a profile 2 one accepted only behind X-Forwarded-Proto. Then
+# a restart of the first one, `down` without `-v`: the schema is up to date,
+# a row written before is still there, and it never reached the second. Then,
+# on the first one, the README's dump to a file outside the container, its
+# administrator reset, and its restore of that file.
 #
 # The sign-in is the real form flow, `_csrf` included, from inside the
 # container: nothing is published, by design. The template serves SteVe at
@@ -331,6 +333,67 @@ echo "Flyway: up to date."
 signed_in "${a}" "$(value "${a}" "${admin_user}")" "$(value "${a}" "${admin_password}")" \
   || fail "${a}: the administrator no longer signs in after the restart"
 echo "the row survived on ${a}, never reached ${b}; the administrator still signs in."
+
+header "dump, administrator reset, restore"
+# The commands of deploy/coolify/README.md, run where it runs them: in
+# steve-db, with the password read there, never on a command line. Two
+# departures. The dump goes to stdout and lands outside the container, as a
+# hand dump has to: Coolify's Stop, Restart and Deploy destroy the container
+# and its /tmp. The restore reads the file back on stdin. The reset command
+# names the administrator, which steve-db does not know: the value is put in
+# for <AUTH_USER>, as an operator copies it from Coolify.
+# shellcheck disable=SC2016 # expanded by the container shell
+readme_dump='MYSQL_PWD="$MARIADB_PASSWORD" mariadb-dump --single-transaction --routines --events -u steve stevedb'
+# shellcheck disable=SC2016
+readme_reset='MYSQL_PWD="$MARIADB_PASSWORD" mariadb -u steve stevedb -e "DELETE FROM web_user WHERE username = '\''<AUTH_USER>'\''"'
+# shellcheck disable=SC2016
+readme_drop='MYSQL_PWD="$MARIADB_PASSWORD" mariadb -u steve -e "DROP DATABASE stevedb; CREATE DATABASE stevedb"'
+# shellcheck disable=SC2016
+readme_import='MYSQL_PWD="$MARIADB_PASSWORD" mariadb -u steve stevedb'
+in_db() { compose "$1" exec -T steve-db sh -c "$2"; }
+# set_value PROJECT NAME VALUE: what changing a variable in Coolify does.
+set_value() {
+  local f="${work}/$1.env"
+  { grep -v "^$2=" "${f}"; printf '%s=%s\n' "$2" "$3"; } >"${f}.new" && mv "${f}.new" "${f}"
+}
+restart_steve() {
+  compose "$1" restart steve >/dev/null 2>&1 || fail "$1: steve did not restart"
+  compose "$1" up -d --wait --wait-timeout "${steve_timeout}" steve >/dev/null 2>&1 || fail "$1: steve not healthy after $2"
+}
+
+user=$(value "${a}" "${admin_user}")
+old_password=$(value "${a}" "${admin_password}")
+in_db "${a}" "${readme_dump}" >"${work}/dump.sql" || fail "${a}: the README's dump command failed"
+[ "$(tail -n 1 "${work}/dump.sql" | cut -c1-17)" = '-- Dump completed' ] \
+  || fail "${a}: the dump outside the container does not end with '-- Dump completed'"
+echo "dumped to the host ($(wc -c <"${work}/dump.sql" | tr -d ' ') bytes, '-- Dump completed')."
+sql "${a}" "INSERT INTO ocpp_tag (id_tag, note) VALUES ('${run}-late', 'coolify-template-test')"
+
+new_password=$(random 32)
+set_value "${a}" "${admin_password}" "${new_password}"
+compose "${a}" up -d --wait --wait-timeout "${steve_timeout}" steve >/dev/null 2>&1 \
+  || fail "${a}: steve not healthy after the variable changed"
+signed_in "${a}" "${user}" "${old_password}" || fail "${a}: a changed variable alone replaced the administrator's password"
+refused "${a}" "${user}" "${new_password}" || fail "${a}: the new password signs in before the reset"
+echo "the variable alone changes nothing: the old password still signs in."
+in_db "${a}" "${readme_reset//<AUTH_USER>/${user}}" || fail "${a}: the README's reset command failed"
+restart_steve "${a}" "the reset"
+signed_in "${a}" "${user}" "${new_password}" || fail "${a}: the new password does not sign in after the reset"
+refused "${a}" "${user}" "${old_password}" || fail "${a}: the old password still signs in after the reset"
+refused "${a}" admin 1234 || fail "${a}: admin/1234 signs in after the reset"
+echo "after the README's reset and a restart: the new password signs in, the old one and admin/1234 do not."
+
+compose "${a}" stop steve >/dev/null 2>&1 || fail "${a}: steve did not stop"
+in_db "${a}" "${readme_drop}" || fail "${a}: the README's drop and create failed"
+in_db "${a}" "${readme_import}" <"${work}/dump.sql" || fail "${a}: the README's import failed"
+compose "${a}" up -d --wait --wait-timeout "${steve_timeout}" steve >/dev/null 2>&1 \
+  || fail "${a}: steve not healthy after the restore"
+[ "$(sql "${a}" "SELECT COUNT(*) FROM ocpp_tag WHERE id_tag = '${run}'")" = 1 ] || fail "${a}: the row in the dump is not restored"
+[ "$(sql "${a}" "SELECT COUNT(*) FROM ocpp_tag WHERE id_tag = '${run}-late'")" = 0 ] || fail "${a}: a row written after the dump survived the restore"
+# The dump carries web_user, so the administrator comes back as it was then.
+signed_in "${a}" "${user}" "${old_password}" || fail "${a}: the dump's administrator does not sign in after the restore"
+refused "${a}" "${user}" "${new_password}" || fail "${a}: the reset password still signs in after the restore"
+echo "restored: the dump's rows and the dump's administrator are back, later ones gone."
 
 echo
 echo "OK: the template came up twice, side by side, as Coolify would run it."
