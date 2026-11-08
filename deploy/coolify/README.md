@@ -175,42 +175,78 @@ All state is the MariaDB data directory, in the `steve-mariadb-data` volume,
 named `<resource-uuid>_steve-mariadb-data` on the server (measured). A copy
 of a running data directory is not a consistent backup; a logical dump is.
 
+**A backup lives off the server.** Coolify's **Stop**, **Restart** and
+**Deploy** remove both containers and create new ones — a `destroy` event
+for each on every path (measured, Coolify 4.5.3) — so a file written inside
+`steve-db`, its `/tmp` included, is gone after the first of them, and one on
+the disk holding the volume goes with the server.
+
 **Coolify's own scheduled backups first.** Coolify recognises a MariaDB image
 inside a Service as a database component and offers it the scheduled,
 engine-aware backups of its standalone databases, uploaded to S3-compatible
 storage if you configure one; for MariaDB it reads `MARIADB_ROOT_PASSWORD`
 and `MARIADB_DATABASE` from the container, which the template sets
 ([Coolify: Back up a database inside a service](https://coolify.io/docs/databases/backups)).
-That is Coolify's documentation, not yet run on this template — it is on the
-checklist, restore included: a backup is only proven by restoring it.
+Run on this template, set in the UI with an S3-compatible target: the
+scheduled backup succeeded, the uploaded object's checksum equal to the local copy, and
+it restored into a second instance — 31 tables, schema `v1.1.6`, data and
+sign-in back (measured, Coolify 4.5.3). It is set per instance: a new
+instance has no schedule until someone sets one, and Coolify's API answers
+`Database not found` for that database's backups, so check each instance in
+the UI. **Back up now** was not run.
 
-**A dump by hand**, the fallback and the way to a file you hold yourself.
-From the `steve-db` container — Coolify's **Terminal**, or a **Scheduled
-Task** on that container for a recurring one:
+**A dump by hand**, the way to a file you hold yourself, and the one to take
+just before an update. It has to land outside the container. On the server,
+over SSH, with the container names `docker ps` shows for `steve-db` and
+`steve` (Coolify suffixes them with the resource's id):
 
 ```bash
-MYSQL_PWD="$MARIADB_PASSWORD" mariadb-dump --single-transaction --routines --events -u steve stevedb > /tmp/steve-backup.sql
+docker exec <steve-db container> sh -c 'MYSQL_PWD="$MARIADB_PASSWORD" mariadb-dump --single-transaction --routines --events -u steve stevedb' > steve-backup.sql
 ```
 
-The password is read inside the container, so it never appears on a command
-line. Copy the dump off the server: a file in the container, or on the disk
-holding the volume, is lost with them. The shape of a dump that cannot pass
+The single quotes keep `$MARIADB_PASSWORD` for the container's shell: the
+password is read there and never appears on a command line. No `-t`, so
+nothing but the dump reaches the file. The file is on the server's disk:
+copy it off before any Coolify action. The shape of a dump that cannot pass
 for a good one when it failed — a `.partial` file renamed on success, the
 `-- Dump completed` last line — is in the main README's
-[*Upgrading*](../../README.md#1-back-up-the-database).
+[*Upgrading*](../../README.md#1-back-up-the-database). For a recurring copy,
+use the scheduled backup above: a **Scheduled Task** on `steve-db` writes
+inside the container.
 
-To restore, stop `steve` first, so that nothing writes while the schema is
-replaced, then from `steve-db`:
+To restore, stop `steve` alone, so that nothing writes while the schema is
+replaced — with `docker stop`, not Coolify's **Stop** or **Restart**, which
+take `steve-db` down with it. A container stopped that way stays stopped:
+`unless-stopped` does not start it again (measured, plain Compose). Then:
 
 ```bash
-MYSQL_PWD="$MARIADB_PASSWORD" mariadb -u steve -e "DROP DATABASE stevedb; CREATE DATABASE stevedb"
-MYSQL_PWD="$MARIADB_PASSWORD" mariadb -u steve stevedb < /tmp/steve-backup.sql
+docker stop <steve container>
+docker exec <steve-db container> sh -c 'MYSQL_PWD="$MARIADB_PASSWORD" mariadb -u steve -e "DROP DATABASE stevedb; CREATE DATABASE stevedb"'
+docker exec -i <steve-db container> sh -c 'MYSQL_PWD="$MARIADB_PASSWORD" mariadb -u steve stevedb' < steve-backup.sql
+docker start <steve container>
 ```
 
-and start `steve` again: Flyway finds the schema the dump carried and applies
-whatever the image has beyond it. The drop is not optional — a dump only
-drops the tables it contains, so tables a later migration added would
-survive into the restored schema.
+Flyway finds the schema the dump carried and applies whatever the image has
+beyond it. The drop is not optional — a dump only drops the tables it
+contains, so tables a later migration added would survive into the restored
+schema. CI runs these commands — the part in quotes, unchanged — with
+`docker compose exec -T` against plain Compose, the dump kept outside the
+container (see *What is tested*); the `docker exec` around them is not run
+on a Coolify server.
+
+**From a scheduled backup**, fetch the object Coolify uploaded — a `.dmp` —
+from the S3-compatible storage with the client of your choice, and copy it
+to the server. It is plain SQL, without `CREATE DATABASE` or `USE`
+(measured), so it goes into the database the command names, after the same
+drop and create: the same four commands, with that file in place of
+`steve-backup.sql`.
+
+**A restore brings the dump's administrator back.** `web_user` is in the
+dump, so after an administrator reset, or with a dump of another instance,
+the password Coolify shows for this one no longer signs in and the dump's
+does (measured, Coolify 4.5.3, one instance's dump restored into another;
+and in CI). The wrong dump hands over another instance's administrator.
+Reset it afterwards if needed (see *Generated credentials*).
 
 ## Updating
 
@@ -221,9 +257,13 @@ only when you carry it into that instance's Compose file yourself (Coolify's
 
 Change the tag on the `image:` line and redeploy. The new image brings its
 Flyway migrations and applies the ones the database has not seen before SteVe
-starts; a redeploy of the same tag is a no-op for Flyway. Take a dump first:
-**migrations only go forward**, and putting the previous tag back on a
-migrated schema is not a supported path — the way back is the dump. The main
+starts; a redeploy of the same tag is a no-op for Flyway. Take a backup
+first, and have it off the server before you redeploy — a scheduled backup
+in the S3-compatible storage, or a dump by hand copied off (see *Backup and
+restore*): the redeploy destroys both containers, and a dump left inside
+`steve-db` with them. **Migrations only go forward**, and putting the
+previous tag back on a migrated schema is not a supported path — the way
+back is that backup. The main
 README's [*Upgrading*](../../README.md#upgrading) and
 [*Downgrading*](../../README.md#downgrading) hold the details.
 
