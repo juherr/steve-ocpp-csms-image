@@ -20,7 +20,8 @@
 # a restart of the first one, `down` without `-v`: the schema is up to date,
 # a row written before is still there, and it never reached the second. Then,
 # on the first one, the README's dump to a file outside the container, its
-# administrator reset, and its restore of that file.
+# administrator reset, and its restore of that file; on the second, steve-db
+# killed and started again under a running steve.
 #
 # The sign-in is the real form flow, `_csrf` included, from inside the
 # container: nothing is published, by design. The template serves SteVe at
@@ -394,6 +395,29 @@ compose "${a}" up -d --wait --wait-timeout "${steve_timeout}" steve >/dev/null 2
 signed_in "${a}" "${user}" "${old_password}" || fail "${a}: the dump's administrator does not sign in after the restore"
 refused "${a}" "${user}" "${new_password}" || fail "${a}: the reset password still signs in after the restore"
 echo "restored: the dump's rows and the dump's administrator are back, later ones gone."
+
+header "steve-db lost alone"
+# steve's healthcheck reads the sign-in page, which needs no database: with
+# steve-db gone for 300 s it stayed healthy while sign-in and the upgrade
+# failed (measured, plain Compose). So whether SteVe recovers when the
+# database comes back is asked of a sign-in and an upgrade, both of which
+# read it. `docker kill` stands for a crash only in what it does to steve's
+# pool. A real crash, mariadbd killed from outside Docker, was restarted
+# under `unless-stopped` (measured), which Coolify adds (read, RESTART_MODE
+# in its constants.php); `docker kill` is a manual stop to Docker and is not
+# restarted (measured), so the database is started by hand, steve left as
+# it is.
+steve_started() { docker inspect -f '{{.Id}} {{.State.StartedAt}}' "$(compose "${b}" ps -q steve)"; }
+before=$(steve_started)
+docker kill "$(compose "${b}" ps -q steve-db)" >/dev/null || fail "${b}: steve-db could not be killed"
+compose "${b}" start steve-db >/dev/null 2>&1 || fail "${b}: steve-db did not start again"
+compose "${b}" up -d --wait --wait-timeout "${steve_timeout}" >/dev/null 2>&1 || fail "${b}: not healthy after steve-db came back"
+signed_in "${b}" "$(value "${b}" "${admin_user}")" "$(value "${b}" "${admin_password}")" \
+  || fail "${b}: the administrator does not sign in after steve-db came back"
+code=$(upgrade "${b}" "${run}-cp")
+[ "${code}" = 101 ] || fail "${b}: a registered charge point's upgrade answered '${code}' after steve-db came back, expected 101"
+[ "$(steve_started)" = "${before}" ] || fail "${b}: steve was restarted or recreated, which proves nothing about its pool"
+echo "steve-db killed and started again: sign-in and upgrade work, steve not restarted."
 
 echo
 echo "OK: the template came up twice, side by side, as Coolify would run it."
