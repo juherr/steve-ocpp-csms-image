@@ -179,6 +179,13 @@ steve_image=$(jq -r '.services.steve.image // ""' <<<"${source_json}")
 [[ "${steve_image}" =~ ^ghcr\.io/juherr/steve:steve-[0-9]+\.[0-9]+\.[0-9]+(@sha256:[0-9a-f]{64})?$ ]] \
   || fail "steve image '${steve_image}' is not a steve-X.Y.Z tag of ghcr.io/juherr/steve"
 echo "image: ${steve_image}"
+# Tags are per server: a pull for one installation moves the image every
+# other one restarts on. A patch pin makes each MariaDB move a Renovate PR,
+# which this test then boots; a floating 11.8 would move with no CI at all.
+db_image=$(jq -r '.services["steve-db"].image // ""' <<<"${source_json}")
+[[ "${db_image}" =~ ^mariadb:[0-9]+\.[0-9]+\.[0-9]+(@sha256:[0-9a-f]{64})?$ ]] \
+  || fail "steve-db image '${db_image}' is not pinned to a mariadb patch release"
+echo "image: ${db_image}"
 # The pin moves only if Renovate reads the file, and the manager reads it only
 # through the path renovate.json adds; hack/renovate-extract-check.sh proves
 # the extraction, this that the path still names the template.
