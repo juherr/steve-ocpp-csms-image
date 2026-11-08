@@ -336,13 +336,15 @@ signed_in "${a}" "$(value "${a}" "${admin_user}")" "$(value "${a}" "${admin_pass
 echo "the row survived on ${a}, never reached ${b}; the administrator still signs in."
 
 header "dump, administrator reset, restore"
-# The commands of deploy/coolify/README.md, run where it runs them: in
-# steve-db, with the password read there, never on a command line. Two
-# departures. The dump goes to stdout and lands outside the container, as a
-# hand dump has to: Coolify's Stop, Restart and Deploy destroy the container
-# and its /tmp. The restore reads the file back on stdin. The reset command
-# names the administrator, which steve-db does not know: the value is put in
-# for <AUTH_USER>, as an operator copies it from Coolify.
+# The commands of deploy/coolify/README.md, the part it quotes for the
+# container's shell unchanged: in steve-db, with the password read there,
+# never on a command line. The dump goes to stdout and lands outside the
+# container, as the README's does: Coolify's Stop, Restart and Deploy
+# destroy the container and its /tmp. The restore reads the file back on
+# stdin. The README wraps them in `docker exec`, this in `docker compose
+# exec -T`; and the reset names the administrator, which steve-db does not
+# know: the value is put in for <AUTH_USER>, as an operator copies it from
+# Coolify.
 # shellcheck disable=SC2016 # expanded by the container shell
 readme_dump='MYSQL_PWD="$MARIADB_PASSWORD" mariadb-dump --single-transaction --routines --events -u steve stevedb'
 # shellcheck disable=SC2016
