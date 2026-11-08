@@ -316,7 +316,8 @@ from the S3-compatible storage with the client of your choice, and copy it
 to the server. It is plain SQL, without `CREATE DATABASE` or `USE`
 (measured), so it goes into the database the command names, after the same
 drop and create: the same four commands, with that file in place of
-`steve-backup.sql`.
+`steve-backup.sql`. Such an object was restored into a second instance
+(see *Results*); these four commands, as written, have not been run on it.
 
 **A restore brings the dump's administrator back.** `web_user` is in the
 dump, so after an administrator reset, or with a dump of another instance,
@@ -348,7 +349,7 @@ README's [*Upgrading*](../../README.md#upgrading) and
 
 What each action does to the image and the containers, on Coolify 4.5.3:
 
-| Action | Pulls the image | Stops the old containers | Status |
+| Action | Pulls a tag the server already holds | Stops the old containers | Status |
 | --- | --- | --- | --- |
 | API `/restart`, or `/stop` then `/start` | no | `docker stop --timeout=30`, then `rm -f` | measured |
 | API `/restart?latest=true` | yes | a Compose recreate, no overlap | measured |
@@ -428,8 +429,9 @@ equal the original's, its URL and volume are its own, it is not started,
 and once started it boots empty and the original's credentials sign in
 (measured, Coolify 4.5.3, through Coolify's clone code rather than the UI
 button). It also copies the backup schedule (read, not measured). A new
-instance from the template gets its own access policy, its own backup
-schedule and its own updates — none of them follows from the first. If you
+instance from the template needs its own access policy, its own backup
+schedule and its own updates, each set by hand — none of them carries over
+from the first. If you
 do clone, regenerate the `SERVICE_PASSWORD_*`
 and `SERVICE_USER_*` values *before* its first deploy: once it has started,
 they no longer change anything (see *Generated credentials*).
@@ -504,9 +506,11 @@ Record the Coolify version, then:
 - [x] A redeploy on a new tag: the old `steve` container is stopped before
       the new one starts, and the `Migrating schema` lines are in the new
       one's log.
-- [x] The same tag again, through the API: `/restart` and `/stop` then
-      `/start` keep the image on the server, `/restart?latest=true` pulls
-      the registry's (the image id of the new `steve` container).
+- [ ] The same tag again: `/restart` and `/stop` then `/start` keep the
+      image on the server and `/restart?latest=true` pulls the registry's —
+      run, through the API — and the UI's **Deploy** and **Pull Latest
+      Images & Restart** pull it — read in Coolify's code, not clicked (the
+      image id of the new `steve` container).
 - [x] The administrator reset under *Generated credentials*: a new
       `SERVICE_PASSWORD_ADMIN`, the row deleted, `steve` restarted, the new
       password signs in.
@@ -517,8 +521,9 @@ Results, and any Coolify limitation found on the way, go below.
 
 **Coolify 4.5.3, behind Cloudflare, an identity-aware access policy on the
 domain, SteVe at the root, the template at `4a42d02`** — a second instance
-created for the run, then deleted. Every box above was run here; the one
-left open is the limit the run found.
+created for the run, then deleted. Every box above was run here. Two stay
+open: the path from a container on the server, a limit the run found, and
+the same-tag box, whose UI buttons were not clicked.
 
 - Parses: also created through `POST /services`; `SERVICE_USER_*` (16
   characters) and `SERVICE_PASSWORD_*` (32) generated, distinct per
