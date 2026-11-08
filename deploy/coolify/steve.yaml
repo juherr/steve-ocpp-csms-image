@@ -75,7 +75,11 @@ services:
       - MARIADB_PASSWORD=${SERVICE_PASSWORD_MARIADB}
     volumes:
       - steve-mariadb-data:/var/lib/mysql
-    # Time for InnoDB to shut down cleanly before Docker kills it.
+    # Time for InnoDB to shut down cleanly before Docker kills it — on a
+    # Compose recreate (Deploy, Pull Latest Images & Restart; read, not
+    # measured). Coolify's Stop and Restart cap the wait at 30 s whatever
+    # this says (read, Coolify's StopService). At rest MariaDB exits cleanly
+    # in 0.2 s (measured on Coolify 4.5.3), far below either.
     stop_grace_period: 1m
     healthcheck:
       test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
