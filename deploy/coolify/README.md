@@ -49,7 +49,6 @@ inspect` prints, `…:steve-X.Y.Z@sha256:<digest>`.
 | `SERVICE_PASSWORD_MARIADB` | 32 random characters | `DB_PASSWORD` in `steve`, `MARIADB_PASSWORD` in `steve-db` — one value, shared |
 | `SERVICE_PASSWORD_ROOT` | 32 random characters | `MARIADB_ROOT_PASSWORD` — not used by SteVe |
 | `SERVICE_URL_STEVE_8180` | the domain | Coolify's proxy, which routes it to the container's `8180` |
-| `STEVE_MEMORY_LIMIT` | default `1g` | `mem_limit` of `steve` — see *Memory* |
 
 Nothing else is a credential: no upstream default reaches the container. The
 compiled-in `admin`/`1234` is replaced; the Web API is off; unknown charge
@@ -66,12 +65,17 @@ SteVe at that release has no page to change a password, so the way to a new
 administrator password is to let SteVe create the administrator again: change
 the variable in Coolify, delete the administrator's row from `steve-db`,
 then restart `steve` — it finds no administrator and creates one from the
-current `AUTH_USER`, `AUTH_PASSWORD` and `WEBAPI_VALUE` (measured; nothing
-else in the schema references that table):
+current `AUTH_USER`, `AUTH_PASSWORD` and `WEBAPI_VALUE` (measured on Coolify
+4.5.3, and in CI; nothing else in the schema references that table). In
+`steve-db` — Coolify's **Terminal** on that container:
 
 ```bash
 MYSQL_PWD="$MARIADB_PASSWORD" mariadb -u steve stevedb -e "DELETE FROM web_user WHERE username = '<AUTH_USER>'"
 ```
+
+with `<AUTH_USER>` replaced by the value of `SERVICE_USER_ADMIN` copied from
+Coolify: `steve-db` does not define `AUTH_USER`. The username, not a secret,
+is then on that command's line inside the container.
 
 For the database password, `ALTER USER` in the database first, then the
 variable, so that the two agree.
@@ -179,8 +183,41 @@ value, not a sizing recommendation. What the heap takes of it, what the
 container was measured at under `1g` and under less, and why the limit has to
 hold more than the heap, are in the main README's *Memory* paragraph, under
 [*Deploying on a NAS or a small board*](../../README.md#deploying-on-a-nas-or-a-small-board).
-Raise it with the number of charge points; `docker stats` on the server reads
-what they add. MariaDB has no limit and sizes itself.
+
+`1g` has only been seen idle. Under it the heap may grow to about 870 MiB
+(85 %), which leaves about 154 MiB for everything else the JVM holds; if the
+container reaches the limit, the kernel can kill it and every charge point's
+session goes with it. What load does to that was not measured, so no
+per-instance budget is given: raise the limit with the number of charge
+points, and read what they add with `docker stats` on the server. At rest an
+instance takes about 0.7 to 0.8 GiB of the server's memory, both containers
+together (`free -m`, a noisy figure, Coolify 4.5.3).
+
+`STEVE_MEMORY_LIMIT` is not a generated value, and Coolify shows no row for
+it — none on a service created through its API (measured, Coolify 4.5.3).
+To change the limit, edit the `${STEVE_MEMORY_LIMIT:-1g}` default in the
+instance's Compose file in Coolify, or add the variable to the instance;
+neither has been run, nor has any value but `1g`.
+
+MariaDB has no limit (measured) and does not size itself to the server: it
+runs on its defaults, a 128 MiB InnoDB buffer pool and 151 connections
+(measured, Coolify 4.5.3), and nothing here adjusts them.
+
+**`healthy` covers SteVe serving its sign-in page, not the database.** The
+healthcheck reads `/manager/signin`, which needs no database: with
+`steve-db` stopped for 300 s, `steve` stayed `healthy` while sign-in was
+refused. When `mariadbd` itself crashed — killed from outside Docker —
+`unless-stopped` restarted it in about 70 ms and it was healthy again about
+5 s later; `steve` never left `healthy`, was not restarted, and its
+connection pool replaced the dead connections: the first request that read
+the database, about 12 s after the crash (bound by the probe's interval,
+not a recovery time), signed in, and a charge point's upgrade got its 101.
+A `docker kill` or a manual stop of `steve-db` is not restarted by
+`unless-stopped` (restart count 0 for 300 s). All of this measured on plain
+Compose, Docker Desktop on macOS, not on Coolify; Coolify adds
+`unless-stopped` when a template sets no restart policy (read, Coolify
+4.5.3's code). CI kills `steve-db`, starts it again and checks the same
+sign-in and upgrade (see *What is tested*).
 
 ## Backup and restore
 

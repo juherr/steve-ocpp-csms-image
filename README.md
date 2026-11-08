@@ -331,8 +331,10 @@ from the whole machine: 6.5 GiB of heap allowed on a 7.65 GiB host
 on the `steve` service. The heap is not the whole process: metaspace, thread
 stacks and the JVM's own native memory sit on top of it, and the container
 limit has to hold all of that — once the heap has grown to its cap, the
-non-heap has only what the heap leaves of the limit to fit in. MariaDB sizes
-itself independently and is left alone here.
+non-heap has only what the heap leaves of the limit to fit in. MariaDB does
+not size itself to the machine — it runs on its defaults, a 128 MiB InnoDB
+buffer pool and 151 connections (measured on the Coolify template's
+MariaDB) — and is left alone here.
 
 ```yaml
   steve:
