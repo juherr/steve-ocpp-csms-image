@@ -19,8 +19,14 @@ it is, with plain Compose standing in for Coolify; see *What is tested*.
 2. Paste the whole of [`steve.yaml`](steve.yaml) into **Docker Compose file**
    and **Save**. Coolify parses it, shows the two services, `steve` and
    `steve-db`, and generates the variables below.
-3. Give the `steve` service a domain, if Coolify did not generate one, and
-   check the variables (see *Generated credentials*).
+3. Give the `steve` service an `https://` domain, and check the variables
+   (see *Generated credentials*). If Coolify generated a domain, **replace**
+   it rather than add yours next to it: the generated name's route listens
+   on plain HTTP with no redirect, so the administrator's password, a charge
+   point's Basic credentials and `/services/` would travel in clear, and a
+   domain added beside it leaves that route answering; replaced, the old
+   name answers 404 (measured, Coolify 4.5.3). Not tested: a wildcard
+   domain already served over HTTPS.
 4. **Deploy**. The first boot migrates the empty database before SteVe starts:
    the `steve` container becomes healthy within the 150 s the healthcheck
    allows, under a minute on a native host (measured).
@@ -93,10 +99,13 @@ the container's `8180`; SteVe itself speaks plain HTTP. For charge points
 using OCPP security profile 2 — Basic authentication, which requires TLS —
 SteVe has to know the connection was TLS before the proxy: the template sets
 `STEVE_OCPP_SECURITY_PROTOCOL_HEADER_FROM_PROXY=X-Forwarded-Proto` for that.
-On a real Coolify, profile 2 over `wss://` is accepted (101) and a plain
-`ws://` is redirected to `https://` by the proxy; an `X-Forwarded-Proto: http`
-forged by the client does not reach SteVe — the proxy sets the header itself
-(measured, Coolify 4.4.6 behind Cloudflare).
+On a real Coolify, on an `https://` domain, profile 2 over `wss://` is
+accepted (101) and a plain `ws://` is redirected to `https://` by the proxy;
+an `X-Forwarded-Proto: http` forged by the client does not reach SteVe — the
+proxy sets the header itself (measured behind Cloudflare, Coolify 4.4.6
+under `/steve`, replayed at the root on 4.5.3). The redirect is the
+`https://` domain's: the plain-HTTP route of a generated domain has none
+(see *Install*).
 
 **Keep the connection alive from the charge point.** A proxy in front of
 Coolify may close an idle WebSocket: behind Cloudflare the session was cut
