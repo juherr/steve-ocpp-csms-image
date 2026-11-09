@@ -44,7 +44,7 @@ this example fixes is only what *this image* needs to run.
    ```
 
    Every key becomes an environment variable of the container (`envFrom`), so
-   any other setting from the configuration table — `DB_USER`, `WEBAPI_KEY` —
+   any other setting from the configuration table — `DB_USER`, `WEBAPI_VALUE` —
    goes in the same way. Keep the `Secret` to SteVe settings: a stray key
    would become a stray variable.
 
