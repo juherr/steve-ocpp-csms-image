@@ -55,6 +55,15 @@ release as second argument — on a schema that release wrote. So:
   it. For a change to the script itself, break something the manifest declares
   — the `/tmp` mount, a probe path, `envFrom`, `Recreate` — and watch it go
   red before it goes green.
+- For a change under `deploy/coolify/`, the proof is
+  `hack/coolify-template-test.sh` — plain Compose standing in for Coolify, two
+  installations side by side, against the published tag the template names,
+  the README's dump, reset and restore commands replayed and `steve-db` lost
+  under a running `steve`. It proves nothing about Coolify itself: its
+  parser, proxy, TLS, WebSockets and Clone are the manual checklist in
+  `deploy/coolify/README.md`. Say which of the two a claim rests on. Do not
+  edit the template while the script runs — every `docker compose` call
+  re-reads it, and a run that saw two versions proves neither.
 
 The rule extends to claims *about the tools themselves*. Comments and
 documentation here assert how hadolint, zizmor, Trivy, Renovate, BuildKit or
