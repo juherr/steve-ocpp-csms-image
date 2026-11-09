@@ -104,6 +104,10 @@ cleanup() {
 trap cleanup EXIT
 
 fail() { echo "FAIL: $1" >&2; exit 1; }
+# healthy PROJECT MESSAGE [SERVICE…]: up and healthy, or fail with MESSAGE.
+healthy() {
+  compose "$1" up -d --wait --wait-timeout "${steve_timeout}" "${@:3}" >/dev/null 2>&1 || fail "$2"
+}
 
 # random LENGTH: alphanumeric, as Coolify's generated values are. head ends
 # first and the rest read to the end, so pipefail sees no SIGPIPE.
@@ -239,7 +243,7 @@ for p in "${projects[@]}"; do
   compose "${p}" up -d --quiet-pull
 done
 for p in "${projects[@]}"; do
-  compose "${p}" up -d --wait --wait-timeout "${steve_timeout}" >/dev/null 2>&1 || fail "${p} not healthy after ${steve_timeout}s"
+  healthy "${p}" "${p} not healthy after ${steve_timeout}s"
   echo "${p} healthy."
 done
 
@@ -261,6 +265,10 @@ rm -f "$jar"'
 signin() { compose "$1" exec -T steve sh -c "${signin_script}" sh "$2" "$3"; }
 signed_in() { [[ "$(signin "$@")" =~ ^http://127\.0\.0\.1:8180/\ 200$ ]]; }
 refused() { [[ "$(signin "$@")" =~ signin\?error\ 302$ ]]; }
+# signin_admin / signed_in_admin PROJECT: with that installation's generated
+# administrator.
+signin_admin() { signin "$1" "$(value "$1" "${admin_user}")" "$(value "$1" "${admin_password}")"; }
+signed_in_admin() { signed_in "$1" "$(value "$1" "${admin_user}")" "$(value "$1" "${admin_password}")"; }
 in_container() { compose "$1" exec -T steve curl -sS -o /dev/null -w '%{http_code}' "${@:2}"; }
 # upgrade PROJECT CHARGE_BOX_ID [CURL ARGS…]: the status of an OCPP 1.6
 # WebSocket upgrade. An accepted one stays open until --max-time, and curl
@@ -281,6 +289,8 @@ p2_password=profile2-test-password
 p2_hash='$2y$10$XaVpwp2o6N/Tr2RR0UhZz.pX2/77c5CaNNDQZeNZxugz70RGHW2Bu'
 # shellcheck disable=SC2016 # expanded by the container shell
 sql() { compose "$1" exec -T steve-db sh -c 'MYSQL_PWD="$MARIADB_PASSWORD" mariadb -N -u steve stevedb -e "$1"' sh "$2"; }
+# tag_count PROJECT ID_TAG: how many ocpp_tag rows carry it, 0 or 1.
+tag_count() { sql "$1" "SELECT COUNT(*) FROM ocpp_tag WHERE id_tag = '$2'"; }
 
 for p in "${projects[@]}"; do
   header "${p}"
@@ -293,8 +303,7 @@ for p in "${projects[@]}"; do
     [ "${bound}" -eq 0 ] || fail "${p}: $(docker inspect -f '{{.Name}}' "${id}") binds a host port"
   done
   echo "no host port bound."
-  signed_in "${p}" "$(value "${p}" "${admin_user}")" "$(value "${p}" "${admin_password}")" \
-    || fail "${p}: the generated administrator does not sign in ($(signin "${p}" "$(value "${p}" "${admin_user}")" "$(value "${p}" "${admin_password}")"))"
+  signed_in_admin "${p}" || fail "${p}: the generated administrator does not sign in ($(signin_admin "${p}"))"
   refused "${p}" admin 1234 || fail "${p}: the upstream default admin/1234 is not refused"
   echo "the generated administrator signs in; admin/1234 is refused."
   code=$(in_container "${p}" -u "$(value "${p}" "${admin_user}"):$(value "${p}" "${admin_password}")" http://127.0.0.1:8180/api/v1/ocppTags)
@@ -329,15 +338,14 @@ echo "${a}'s administrator is refused on ${b}."
 header "restart with the data kept"
 sql "${a}" "INSERT INTO ocpp_tag (id_tag, note) VALUES ('${run}', 'coolify-template-test')"
 compose "${a}" down >/dev/null 2>&1
-compose "${a}" up -d --wait --wait-timeout "${steve_timeout}" >/dev/null 2>&1 || fail "${a} not healthy after the restart"
+healthy "${a}" "${a} not healthy after the restart"
 logs=$(compose "${a}" logs --no-log-prefix steve 2>&1)
 grep -qE '^Schema .stevedb. is up to date\. No migration necessary\.' <<<"${logs}" \
   || fail "${a}: Flyway did not find the schema up to date after the restart"
 echo "Flyway: up to date."
-[ "$(sql "${a}" "SELECT COUNT(*) FROM ocpp_tag WHERE id_tag = '${run}'")" = 1 ] || fail "${a}: the row written before the restart is gone"
-[ "$(sql "${b}" "SELECT COUNT(*) FROM ocpp_tag WHERE id_tag = '${run}'")" = 0 ] || fail "${b} holds ${a}'s row"
-signed_in "${a}" "$(value "${a}" "${admin_user}")" "$(value "${a}" "${admin_password}")" \
-  || fail "${a}: the administrator no longer signs in after the restart"
+[ "$(tag_count "${a}" "${run}")" = 1 ] || fail "${a}: the row written before the restart is gone"
+[ "$(tag_count "${b}" "${run}")" = 0 ] || fail "${b} holds ${a}'s row"
+signed_in_admin "${a}" || fail "${a}: the administrator no longer signs in after the restart"
 echo "the row survived on ${a}, never reached ${b}; the administrator still signs in."
 
 header "dump, administrator reset, restore"
@@ -366,7 +374,7 @@ set_value() {
 }
 restart_steve() {
   compose "$1" restart steve >/dev/null 2>&1 || fail "$1: steve did not restart"
-  compose "$1" up -d --wait --wait-timeout "${steve_timeout}" steve >/dev/null 2>&1 || fail "$1: steve not healthy after $2"
+  healthy "$1" "$1: steve not healthy after $2" steve
 }
 
 user=$(value "${a}" "${admin_user}")
@@ -379,8 +387,7 @@ sql "${a}" "INSERT INTO ocpp_tag (id_tag, note) VALUES ('${run}-late', 'coolify-
 
 new_password=$(random 32)
 set_value "${a}" "${admin_password}" "${new_password}"
-compose "${a}" up -d --wait --wait-timeout "${steve_timeout}" steve >/dev/null 2>&1 \
-  || fail "${a}: steve not healthy after the variable changed"
+healthy "${a}" "${a}: steve not healthy after the variable changed" steve
 signed_in "${a}" "${user}" "${old_password}" || fail "${a}: a changed variable alone replaced the administrator's password"
 refused "${a}" "${user}" "${new_password}" || fail "${a}: the new password signs in before the reset"
 echo "the variable alone changes nothing: the old password still signs in."
@@ -394,10 +401,9 @@ echo "after the README's reset and a restart: the new password signs in, the old
 compose "${a}" stop steve >/dev/null 2>&1 || fail "${a}: steve did not stop"
 in_db "${a}" "${readme_drop}" || fail "${a}: the README's drop and create failed"
 in_db "${a}" "${readme_import}" <"${work}/dump.sql" || fail "${a}: the README's import failed"
-compose "${a}" up -d --wait --wait-timeout "${steve_timeout}" steve >/dev/null 2>&1 \
-  || fail "${a}: steve not healthy after the restore"
-[ "$(sql "${a}" "SELECT COUNT(*) FROM ocpp_tag WHERE id_tag = '${run}'")" = 1 ] || fail "${a}: the row in the dump is not restored"
-[ "$(sql "${a}" "SELECT COUNT(*) FROM ocpp_tag WHERE id_tag = '${run}-late'")" = 0 ] || fail "${a}: a row written after the dump survived the restore"
+healthy "${a}" "${a}: steve not healthy after the restore" steve
+[ "$(tag_count "${a}" "${run}")" = 1 ] || fail "${a}: the row in the dump is not restored"
+[ "$(tag_count "${a}" "${run}-late")" = 0 ] || fail "${a}: a row written after the dump survived the restore"
 # The dump carries web_user, so the administrator comes back as it was then.
 signed_in "${a}" "${user}" "${old_password}" || fail "${a}: the dump's administrator does not sign in after the restore"
 refused "${a}" "${user}" "${new_password}" || fail "${a}: the reset password still signs in after the restore"
@@ -418,9 +424,8 @@ steve_started() { docker inspect -f '{{.Id}} {{.State.StartedAt}}' "$(compose "$
 before=$(steve_started)
 docker kill "$(compose "${b}" ps -q steve-db)" >/dev/null || fail "${b}: steve-db could not be killed"
 compose "${b}" start steve-db >/dev/null 2>&1 || fail "${b}: steve-db did not start again"
-compose "${b}" up -d --wait --wait-timeout "${steve_timeout}" >/dev/null 2>&1 || fail "${b}: not healthy after steve-db came back"
-signed_in "${b}" "$(value "${b}" "${admin_user}")" "$(value "${b}" "${admin_password}")" \
-  || fail "${b}: the administrator does not sign in after steve-db came back"
+healthy "${b}" "${b}: not healthy after steve-db came back"
+signed_in_admin "${b}" || fail "${b}: the administrator does not sign in after steve-db came back"
 code=$(upgrade "${b}" "${run}-cp")
 [ "${code}" = 101 ] || fail "${b}: a registered charge point's upgrade answered '${code}' after steve-db came back, expected 101"
 [ "$(steve_started)" = "${before}" ] || fail "${b}: steve was restarted or recreated, which proves nothing about its pool"
