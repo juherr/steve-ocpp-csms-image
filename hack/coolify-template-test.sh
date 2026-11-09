@@ -155,8 +155,12 @@ for name in ${names}; do
       continue ;;
   esac
   for p in "${projects[@]}"; do
-    if [ "${len}" -eq 0 ]; then value="https://${p}.example.test"; else value=$(random "${len}"); fi
-    [ "${len}" -eq 0 ] || [ "${#value}" -eq "${len}" ] || die "generated ${#value} characters, expected ${len}"
+    if [ "${len}" -eq 0 ]; then
+      value="https://${p}.example.test"
+    else
+      value=$(random "${len}")
+      [ "${#value}" -eq "${len}" ] || die "generated ${#value} characters, expected ${len}"
+    fi
     printf '%s=%s\n' "${name}" "${value}" >>"${work}/${p}.env"
   done
   echo "${name}"
@@ -167,15 +171,16 @@ grep -qE '^name:' "${template}" && fail "a top-level name: would be shared by ev
 grep -qE '^networks:' "${template}" && fail "a top-level networks: is Coolify's to provide"
 rendered=$(compose "${projects[0]}" config --format json) \
   || fail "Compose cannot render the template with generated values"
-offenders() { jq -r "$1" <<<"${rendered}" | paste -sd, -; }
-[ -z "$(offenders '.services | to_entries[] | select(.value.ports) | .key')" ] \
-  || fail "publishes ports: $(offenders '.services | to_entries[] | select(.value.ports) | .key')"
-[ -z "$(offenders '.services | to_entries[] | select(.value.container_name) | .key')" ] \
-  || fail "fixed container_name: $(offenders '.services | to_entries[] | select(.value.container_name) | .key')"
-[ -z "$(offenders '.services | to_entries[] | select((.value.healthcheck.test // []) | length == 0 or .[0] == "NONE") | .key')" ] \
-  || fail "no healthcheck: $(offenders '.services | to_entries[] | select((.value.healthcheck.test // []) | length == 0 or .[0] == "NONE") | .key')"
-[ -z "$(offenders '.services | to_entries[] | select(any(.value.volumes[]?; .type != "volume")) | .key')" ] \
-  || fail "bind mount: $(offenders '.services | to_entries[] | select(any(.value.volumes[]?; .type != "volume")) | .key')"
+# no_service MESSAGE FILTER: fail naming every service FILTER selects.
+no_service() {
+  local offenders
+  offenders=$(jq -r ".services | to_entries[] | select($2) | .key" <<<"${rendered}" | paste -sd, -)
+  [ -z "${offenders}" ] || fail "$1: ${offenders}"
+}
+no_service "publishes ports" '.value.ports'
+no_service "fixed container_name" '.value.container_name'
+no_service "no healthcheck" '(.value.healthcheck.test // []) | length == 0 or .[0] == "NONE"'
+no_service "bind mount" 'any(.value.volumes[]?; .type != "volume")'
 echo "no ports, no container_name, a healthcheck each, named volumes only."
 
 steve_image=$(jq -r '.services.steve.image // ""' <<<"${source_json}")
