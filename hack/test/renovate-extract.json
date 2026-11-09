@@ -87,6 +87,26 @@
           }
         ]
       }
+    ],
+    "docker-compose": [
+      {
+        "packageFile": "deploy/coolify/steve.yaml",
+        "deps": [
+          {
+            "depName": "ghcr.io/juherr/steve",
+            "currentValue": "steve-1.0.1",
+            "currentDigest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+            "replaceString": "ghcr.io/juherr/steve:steve-1.0.1@sha256:1111111111111111111111111111111111111111111111111111111111111111",
+            "datasource": "docker"
+          },
+          {
+            "depName": "mariadb",
+            "currentValue": "11.8",
+            "replaceString": "mariadb:11.8",
+            "datasource": "docker"
+          }
+        ]
+      }
     ]
   }
 }

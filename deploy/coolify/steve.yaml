@@ -1,0 +1,96 @@
+# documentation: https://github.com/juherr/steve-ocpp-csms-image/blob/main/deploy/coolify/README.md
+# slogan: SteVe, the open-source OCPP Central System for EV charging stations.
+# category: automation
+# tags: ocpp, ev, charging, csms, emobility
+# logo: svgs/steve.svg
+# port: 8180
+# minversion: 4.5.3
+
+# Coolify one-click template — see README.md next to this file. It stays plain
+# Compose, so hack/coolify-template-test.sh runs it as it is. No ports, no
+# container or project name, no network, no bind mount — Coolify supplies a
+# per-resource network and name, and prefixes the volume, so that two
+# installations on one server keep their network, volume, database and
+# credentials apart. Not everything is apart. They share the server's proxy,
+# through which a container on the server reaches any installation's routes
+# (measured on Coolify 4.5.3), and the server's image tags, so a pull for one
+# moves the image the others restart on (inferred). See README.md.
+#
+# minversion above is the only Coolify version this revision of the template
+# has run on, not a measured lower bound. Coolify's catalog generator reads
+# every comment line starting at column 0 with a colon in it as metadata, so
+# comments up here carry none.
+
+services:
+  steve:
+    # A tag, no digest, so that a republished tag (a JRE update) is taken on
+    # the next pull. Renovate reads it from the registry, so it moves only
+    # once the next tag is published.
+    image: ghcr.io/juherr/steve:steve-3.14.1
+    environment:
+      # Coolify routes the generated domain to the container's 8180.
+      - SERVICE_URL_STEVE_8180
+      # SteVe at the root of that domain rather than under /steve: an
+      # instance owns its domain, and the prefix would only lengthen every
+      # URL a charge point is configured with. Upstream builds the context
+      # path as /${context.path}, so empty is /.
+      - CONTEXT_PATH=
+      - DB_IP=steve-db
+      - DB_PASSWORD=${SERVICE_PASSWORD_MARIADB}
+      - AUTH_USER=${SERVICE_USER_ADMIN}
+      - AUTH_PASSWORD=${SERVICE_PASSWORD_ADMIN}
+      # Upstream blocks the Web API while its secret is empty. Pinned empty,
+      # like the line below, against an upstream default change.
+      - WEBAPI_VALUE=
+      - AUTO_REGISTER_UNKNOWN_STATIONS=false
+      # Coolify's proxy terminates TLS; without the forwarded scheme SteVe
+      # refuses security-profile-2 stations, which require wss://.
+      - STEVE_OCPP_SECURITY_PROTOCOL_HEADER_FROM_PROXY=X-Forwarded-Proto
+    # The JVM sizes its heap from this limit — with none, from the whole
+    # server, for every instance on it. See the main README, "Memory".
+    mem_limit: ${STEVE_MEMORY_LIMIT:-1g}
+    depends_on:
+      steve-db:
+        condition: service_healthy
+    healthcheck:
+      # 127.0.0.1 and not localhost: Jetty binds IPv4, localhost may resolve
+      # to ::1 first. The path follows CONTEXT_PATH: the old
+      # /steve/manager/signin answers a redirect, which curl -f counts as
+      # healthy, so a stale path would never fail.
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:8180/manager/signin"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      # First boot runs the Flyway migrations against an empty database.
+      start_period: 150s
+
+  steve-db:
+    # A patch, not 11.8: tags are per server, and a floating one moves the
+    # engine of every installation on it with no PR. Renovate proposes each
+    # patch (measured with a lookup run), and the template test boots it.
+    image: mariadb:11.8.9
+    environment:
+      # UTC is mandatory: SteVe requires the database and application time
+      # zones to be aligned.
+      - TZ=+00:00
+      - MARIADB_ROOT_PASSWORD=${SERVICE_PASSWORD_ROOT}
+      - MARIADB_DATABASE=stevedb
+      - MARIADB_USER=steve
+      - MARIADB_PASSWORD=${SERVICE_PASSWORD_MARIADB}
+    volumes:
+      - steve-mariadb-data:/var/lib/mysql
+    # Time for InnoDB to shut down cleanly before Docker kills it — on a
+    # Compose recreate (Deploy, Pull Latest Images & Restart; read, not
+    # measured). Coolify's Stop and Restart cap the wait at 30 s whatever
+    # this says (read, Coolify's StopService). At rest MariaDB exits cleanly
+    # in 0.2 s (measured on Coolify 4.5.3), far below either.
+    stop_grace_period: 1m
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      start_period: 30s
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  steve-mariadb-data:
