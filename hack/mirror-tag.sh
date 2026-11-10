@@ -72,7 +72,14 @@ summary() { cat >>"${GITHUB_STEP_SUMMARY:-/dev/null}"; }
 
 config=$(mktemp -d "${TMPDIR:-/tmp}/steve-mirror.XXXXXX")
 trap 'rm -rf "${config}"' EXIT
-crane() { docker run --rm -i -v "${config}:/config" -e DOCKER_CONFIG=/config "${CRANE_IMAGE}" "$@"; }
+# As the user who owns the config: mktemp makes it 0700, and the image's own
+# user, 65532, gets "permission denied" on it on a Linux host — the first
+# release's mirror job (measured since on a volume owned by 1001, the
+# runner's uid). Docker Desktop's file sharing hid it on a laptop.
+crane() {
+  docker run --rm -i --user "$(id -u):$(id -g)" -v "${config}:/config" -e DOCKER_CONFIG=/config \
+    "${CRANE_IMAGE}" "$@"
+}
 
 # --- the source, before anything is written --------------------------------
 #

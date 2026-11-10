@@ -39,7 +39,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --rm|-i) shift ;;
     -v) config="${2%%:*}"; shift 2 ;;
-    -e) shift 2 ;;
+    -e|--user) shift 2 ;;
     *) break ;;
   esac
 done
@@ -113,16 +113,19 @@ expect_copied()    { [ "$(copies)" -eq 1 ] || { fail "expected exactly one copy,
 expect_untouched() { [ "$(copies)" -eq 0 ] || { fail "a copy was made: $(grep ' copy ' "${FAKE_CRANE_LOG}")"; return 1; }; }
 # Every crane invocation went through the image the workflow pins — the
 # exact reference, tag and digest, read from the workflow rather than
-# matched by shape — with the config mounted, and the login took the token
-# on stdin, never as an argument.
+# matched by shape — as the user running the script, with the config
+# mounted, and the login took the token on stdin, never as an argument.
+# The user is what lets crane read the config: mktemp makes it 0700 for the
+# runner, and the image's own user, 65532, got "permission denied" on it in
+# the first release's mirror job.
 pin=$(sed -n 's/^  CRANE_IMAGE: "\(.*\)"$/\1/p' "${HACK_DIR}/../.github/workflows/build-image.yml")
 [[ "${pin}" =~ ^gcr\.io/go-containerregistry/crane:v[0-9.]+@sha256:[0-9a-f]{64}$ ]] \
   || { echo "FAIL the workflow pins CRANE_IMAGE as '${pin}', not as tag@digest"; exit 1; }
 expect_invocations() {
   local line
   while IFS= read -r line; do
-    [[ "${line}" == "run --rm -i -v "*":/config -e DOCKER_CONFIG=/config ${pin} "* ]] \
-      || { fail "an invocation is not through the pinned crane with the config mounted: ${line}"; return 1; }
+    [[ "${line}" == "run --rm -i --user $(id -u):$(id -g) -v "*":/config -e DOCKER_CONFIG=/config ${pin} "* ]] \
+      || { fail "an invocation is not through the pinned crane, as $(id -u):$(id -g), with the config mounted: ${line}"; return 1; }
     [[ "${line}" != *"s3cret"* ]] || { fail "the token is on a command line: ${line}"; return 1; }
   done <"${FAKE_CRANE_LOG}"
   grep -q ' auth login docker.io -u mirror --password-stdin$' "${FAKE_CRANE_LOG}" \
