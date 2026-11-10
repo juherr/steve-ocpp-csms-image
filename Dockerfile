@@ -21,7 +21,7 @@
 
 # --- Build stage: compile the .war from a pinned upstream release tag ---------
 # renovate: datasource=github-releases depName=steve-community/steve
-ARG STEVE_REF=steve-3.14.1
+ARG STEVE_REF=steve-3.15.0
 
 FROM eclipse-temurin:25.0.5_8-jdk AS build
 

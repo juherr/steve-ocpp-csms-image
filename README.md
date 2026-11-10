@@ -67,47 +67,47 @@ the multi-architecture build has; on a tag from before it, the same command
 prints one manifest and no `Manifests:` list.
 
 ```bash
-docker buildx imagetools inspect ghcr.io/juherr/steve:steve-3.14.1
+docker buildx imagetools inspect ghcr.io/juherr/steve:steve-3.15.0
 ```
 
 ```
-Name:      ghcr.io/juherr/steve:steve-3.14.1
+Name:      ghcr.io/juherr/steve:steve-3.15.0
 MediaType: application/vnd.oci.image.index.v1+json
 Digest:    sha256:<index digest>
 
 Manifests:
-  Name:      ghcr.io/juherr/steve:steve-3.14.1@sha256:<amd64 digest>
+  Name:      ghcr.io/juherr/steve:steve-3.15.0@sha256:<amd64 digest>
   MediaType: application/vnd.oci.image.manifest.v1+json
   Platform:  linux/amd64
 
-  Name:      ghcr.io/juherr/steve:steve-3.14.1@sha256:<arm64 digest>
+  Name:      ghcr.io/juherr/steve:steve-3.15.0@sha256:<arm64 digest>
   MediaType: application/vnd.oci.image.manifest.v1+json
   Platform:  linux/arm64
 ```
 
 ```yaml
-image: ghcr.io/juherr/steve:steve-3.14.1@sha256:<index digest>
+image: ghcr.io/juherr/steve:steve-3.15.0@sha256:<index digest>
 ```
 
 The Docker Hub mirror holds that same index, copied by digest rather than
 rebuilt, so `imagetools inspect` prints the same three digests for
-`juherr/steve:steve-3.14.1` and the digest you pin is the one string on
+`juherr/steve:steve-3.15.0` and the digest you pin is the one string on
 both registries.
 
 The exact JRE of an image you already hold is readable from it:
 
 ```bash
-docker run --rm --entrypoint java ghcr.io/juherr/steve:steve-3.14.1 -version
+docker run --rm --entrypoint java ghcr.io/juherr/steve:steve-3.15.0 -version
 ```
 
 ## Usage
 
 ```bash
 # GitHub Container Registry — canonical
-docker pull ghcr.io/juherr/steve:steve-3.14.1
+docker pull ghcr.io/juherr/steve:steve-3.15.0
 
 # Docker Hub — official mirror of the same image
-docker pull juherr/steve:steve-3.14.1
+docker pull juherr/steve:steve-3.15.0
 ```
 
 GHCR is the canonical registry. Docker Hub is an official mirror of the
@@ -127,7 +127,7 @@ name: steve
 
 services:
   steve:
-    image: ghcr.io/juherr/steve:steve-3.14.1
+    image: ghcr.io/juherr/steve:steve-3.15.0
     restart: unless-stopped
     depends_on:
       steve-db:
@@ -441,7 +441,7 @@ before the multi-architecture build, a single manifest's:
 
 ```diff
 -    image: ghcr.io/juherr/steve:steve-X.Y.Z@sha256:<old digest>
-+    image: ghcr.io/juherr/steve:steve-3.14.1@sha256:<index digest>
++    image: ghcr.io/juherr/steve:steve-3.15.0@sha256:<index digest>
 ```
 
 ### 4. Pull and start
@@ -489,7 +489,7 @@ docker compose ps
 
 ```
 NAME               IMAGE                                  STATUS
-steve-steve-1      ghcr.io/juherr/steve:steve-3.14.1      Up About a minute (healthy)
+steve-steve-1      ghcr.io/juherr/steve:steve-3.15.0      Up About a minute (healthy)
 steve-steve-db-1   mariadb:11.8                           Up 7 minutes (healthy)
 ```
 
@@ -544,7 +544,7 @@ docker buildx create --name steve-builder --driver docker-container --driver-opt
 
 docker buildx build \
   --builder steve-builder \
-  --build-arg STEVE_REF=steve-3.14.1 \
+  --build-arg STEVE_REF=steve-3.15.0 \
   --build-arg DB_IP=127.0.0.1 \
   --build-arg BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
   --build-arg VCS_REF="$(git rev-parse HEAD)" \
