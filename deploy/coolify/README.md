@@ -111,16 +111,22 @@ under `/steve`, replayed at the root on 4.5.3). The redirect is the
 `https://` domain's: the plain-HTTP route of a generated domain has none
 (see *Install*).
 
-**Keep the connection alive from the charge point.** A proxy in front of
-Coolify may close an idle WebSocket: behind Cloudflare the session was cut
-before 150 s without traffic, and SteVe sent no WebSocket ping in that time
-(measured). Set the station's `WebSocketPingInterval` below the proxy's idle
-timeout — behind Cloudflare, 60 s kept a session to a Heartbeat 156 s after
-the BootNotification (measured, Coolify 4.5.3; 60 s is the one value tried,
-not a threshold). It is set on each charge point. Stations that do not
-implement it need a Heartbeat interval below that timeout instead, and
-SteVe answers the BootNotification with `interval: 14400` (measured): that
-setting has to change in each instance.
+**Keep the connection alive.** A proxy in front of Coolify may close an
+idle WebSocket: behind Cloudflare the session was cut before 150 s without
+traffic, when SteVe sent no ping of its own (measured, `steve-3.14.1`).
+From `steve-3.15.0` SteVe pings every open session, every 15 minutes by
+default; the template sets `STEVE_OCPP_WS_PING_INTERVAL=60s`, the interval
+a client-side ping kept a session with there. That SteVe pings at that
+interval under that name is measured, by the template test; that a server
+ping keeps a session open behind Cloudflare is not yet — see *Validation on
+a real Coolify*. Lower it under a proxy with a shorter idle timeout, in
+**Environment Variables**. The station-side remedy is the measured one: its
+`WebSocketPingInterval` below the proxy's idle timeout — behind Cloudflare,
+60 s kept a session to a Heartbeat 156 s after the BootNotification
+(measured, Coolify 4.5.3; 60 s is the one value tried, not a threshold).
+Stations that implement neither need a Heartbeat interval below that
+timeout instead, and SteVe answers the BootNotification with
+`interval: 14400` (measured): that setting has to change in each instance.
 
 ## Security
 
@@ -451,7 +457,9 @@ generated administrator signing in where `admin`/`1234` and the other
 installation's administrator do not, the Web API refused, a registered
 charge point's WebSocket upgrade accepted and an unknown one's refused, a
 profile 2 one accepted behind `X-Forwarded-Proto: https` and refused
-without it — all at the root paths. Then it restarts one, keeping its
+without it — all at the root paths. On the first it waits for a WebSocket
+ping on a registered charge point's session, within the template's
+interval. Then it restarts one, keeping its
 volume, and checks that the schema is up to date, that a row written before
 is still there and that it never reached the other one. On that one it then
 replays this README's commands: the dump, to a file outside the container;
@@ -514,6 +522,10 @@ Record the Coolify version, then:
 - [x] The administrator reset under *Generated credentials*: a new
       `SERVICE_PASSWORD_ADMIN`, the row deleted, `steve` restarted, the new
       password signs in.
+- [ ] SteVe's own ping keeps an idle session: a charge point with no
+      client-side ping and a Heartbeat interval above the proxy's idle
+      timeout is still connected after it — behind Cloudflare, after 150 s.
+      New with `steve-3.15.0`; not run yet.
 
 Results, and any Coolify limitation found on the way, go below.
 
@@ -521,9 +533,10 @@ Results, and any Coolify limitation found on the way, go below.
 
 **Coolify 4.5.3, behind Cloudflare, an identity-aware access policy on the
 domain, SteVe at the root, the template at `4a42d02`** — a second instance
-created for the run, then deleted. Every box above was run here. Two stay
-open: the path from a container on the server, a limit the run found, and
-the same-tag box, whose UI buttons were not clicked.
+created for the run, then deleted. Every box above but the last, added with
+`steve-3.15.0`, was run here. Two stay open: the path from a container on
+the server, a limit the run found, and the same-tag box, whose UI buttons
+were not clicked.
 
 - Parses: also created through `POST /services`; `SERVICE_USER_*` (16
   characters) and `SERVICE_PASSWORD_*` (32) generated, distinct per

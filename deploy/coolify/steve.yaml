@@ -26,7 +26,7 @@ services:
     # A tag, no digest, so that a republished tag (a JRE update) is taken on
     # the next pull. Renovate reads it from the registry, so it moves only
     # once the next tag is published.
-    image: ghcr.io/juherr/steve:steve-3.14.1
+    image: ghcr.io/juherr/steve:steve-3.15.0
     environment:
       # Coolify routes the generated domain to the container's 8180.
       - SERVICE_URL_STEVE_8180
@@ -46,6 +46,10 @@ services:
       # Coolify's proxy terminates TLS; without the forwarded scheme SteVe
       # refuses security-profile-2 stations, which require wss://.
       - STEVE_OCPP_SECURITY_PROTOCOL_HEADER_FROM_PROXY=X-Forwarded-Proto
+      # A proxy in front of Coolify may cut an idle WebSocket — Cloudflare
+      # did before 150 s — and upstream's default ping is every 15 minutes.
+      # 60 s is the interval a client-side ping kept a session with there.
+      - STEVE_OCPP_WS_PING_INTERVAL=60s
     # The JVM sizes its heap from this limit — with none, from the whole
     # server, for every instance on it. See the main README, "Memory".
     mem_limit: ${STEVE_MEMORY_LIMIT:-1g}

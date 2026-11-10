@@ -16,7 +16,8 @@
 # both healthy, the database migrated from empty, no host port bound, the
 # generated administrator signs in where the upstream default and the other
 # installation's administrator do not, the Web API refused, an unknown charge
-# point refused, a profile 2 one accepted only behind X-Forwarded-Proto. Then
+# point refused, a profile 2 one accepted only behind X-Forwarded-Proto; on
+# the first, a WebSocket ping within the template's interval. Then
 # a restart of the first one, `down` without `-v`: the schema is up to date,
 # a row written before is still there, and it never reached the second. Then,
 # on the first one, the README's dump to a file outside the container, its
@@ -30,7 +31,8 @@
 # the generated administrator lands on /, the default one on signin?error;
 # with WEBAPI_VALUE empty the administrator has no API password, so /api/
 # answers 401 to Basic auth even with the UI password; a registered charge
-# point's WebSocket upgrade answers 101, an unknown one's 404.
+# point's WebSocket upgrade answers 101, an unknown one's 404. Still so on
+# steve-3.15.0, which added the ping interval (measured by this test, arm64).
 #
 # Given no IMAGE, the template runs as written — the tag Renovate moves is
 # pulled and booted on the pull request that moves it. Given one, it
@@ -226,6 +228,9 @@ expect "${steve_env}" DB_PASSWORD '^\$\{SERVICE_PASSWORD_[A-Z0-9]+\}$'
 expect "${steve_env}" WEBAPI_VALUE '^$'
 expect "${steve_env}" AUTO_REGISTER_UNKNOWN_STATIONS '^false$'
 expect "${steve_env}" CONTEXT_PATH '^$'
+# Seconds, two digits at most: well under the 150 s an idle session lasted
+# behind Cloudflare, and the form the ping check below waits on.
+expect "${steve_env}" STEVE_OCPP_WS_PING_INTERVAL '^[1-9][0-9]?s$'
 # At the root, the old /steve/manager/signin answers a redirect, which
 # `curl -f` counts as healthy: a healthcheck left on it would never fail.
 health=$(jq -r '.services.steve.healthcheck.test | join(" ")' <<<"${rendered}")
@@ -332,6 +337,22 @@ for p in "${projects[@]}"; do
   [ "${code}" = 401 ] || fail "${p}: a profile-2 charge point with a wrong password answered '${code}', expected 401"
   echo "profile 2: 101 behind X-Forwarded-Proto: https; 401 without it, 401 with a wrong password."
 done
+
+header "WebSocket pings"
+# Upstream has no placeholder for steve.ocpp.ws-ping-interval, so the
+# template's variable reaches it through relaxed binding alone, and a name
+# that does not bind leaves the 15-minute default without a word. The proof
+# is a ping on a registered charge point's session: a received frame whose
+# first byte is 0x89 in curl's hex trace. One installation — the wait is the
+# interval itself.
+a=${projects[0]}
+interval=$(jq -r .STEVE_OCPP_WS_PING_INTERVAL <<<"${steve_env}")
+wait=$(( ${interval%s} + 10 ))
+trace=$(compose "${a}" exec -T steve curl -sS -N --max-time "${wait}" -H 'Sec-WebSocket-Protocol: ocpp1.6' \
+  --trace - "ws://127.0.0.1:8180/websocket/CentralSystemService/${run}-cp" 2>/dev/null || true)
+pings=$(grep -cE '^0000: 89 ' <<<"${trace}" || true)
+[ "${pings}" -ge 1 ] || fail "${a}: no WebSocket ping within ${wait} s, with STEVE_OCPP_WS_PING_INTERVAL=${interval}"
+echo "${pings} WebSocket ping(s) within ${wait} s (interval ${interval})."
 
 header "isolation"
 a=${projects[0]} b=${projects[1]}

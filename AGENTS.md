@@ -458,8 +458,10 @@ registered charge point's WebSocket upgrade accepted and an unknown one's
 refused, a profile 2 one accepted behind `X-Forwarded-Proto: https` and
 refused without it — the proof that the template's header variable reaches
 SteVe under that name — at the root paths, the template serving SteVe at
-the root of its domain — then restarts one and finds its data and nothing
-of it in the other. On that one it replays the README's dump, to a file
+the root of its domain — and, on the first, a WebSocket ping within the
+template's `STEVE_OCPP_WS_PING_INTERVAL`, the same proof for a property
+upstream reads by relaxed binding alone — then restarts one and finds its
+data and nothing of it in the other. On that one it replays the README's dump, to a file
 outside the container as Coolify's actions destroy it, the administrator
 reset and the restore; on the other it kills `steve-db` and starts it again
 under a running `steve`, which must sign in and accept a charge point
