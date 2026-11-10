@@ -116,9 +116,11 @@ on that signal — the pod was gone 6 s after the delete, measured.
 says so (`runAsNonRoot`, `runAsUser`, `runAsGroup`) so the kubelet refuses an
 image that does not. The root filesystem is read-only, every capability is
 dropped, privilege escalation is off, the runtime seccomp profile is on. The
-one writable path is `/tmp`, an `emptyDir`: Jetty unpacks the `.war` and Java
-writes its jar caches there, about 160 MB at `steve-3.14.1` (measured); nothing
-else is written.
+one writable path is `/tmp`, an `emptyDir`: Jetty creates its working
+directory there and refuses to start without it, and the JVM writes its perf
+data — 48 KB after a sign-in and a dozen pages at `steve-3.15.0`, where
+`steve-3.14.1` wrote 162 MB of jar caches and compiled JSPs (measured, arm64);
+nothing else is written.
 
 **Memory limit.** The entrypoint starts Java with `-XX:MaxRAMPercentage=85`,
 so the container's memory limit is what sizes the heap; without one the JVM

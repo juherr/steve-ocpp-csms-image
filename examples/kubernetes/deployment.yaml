@@ -74,10 +74,10 @@ spec:
                 - ALL
             readOnlyRootFilesystem: true
           volumeMounts:
-            # Jetty unpacks the .war and Java writes its temp files under
-            # /tmp; with the root filesystem read-only this is the one
-            # writable path the image needs (measured: nothing else is
-            # written).
+            # Jetty creates its working directory under /tmp and refuses to
+            # start without it; with the root filesystem read-only this is
+            # the one writable path the image needs (measured: nothing else
+            # is written).
             - name: tmp
               mountPath: /tmp
           resources:
