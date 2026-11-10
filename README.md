@@ -215,8 +215,17 @@ upstream build. Override every one of them that matters to you.
 | `WEBAPI_VALUE` | that administrator's REST Web API password, set on first start | empty: no API access |
 | `SERVER_HOST` | bind address inside the container | `0.0.0.0` |
 | `AUTO_REGISTER_UNKNOWN_STATIONS` | accept unknown charge points | `false` |
+| `STEVE_OCPP_WS_PING_INTERVAL` | how often SteVe pings each charge point's WebSocket (`60s`; `0` turns pings off) | `15m` |
 
 See upstream's `application.properties` for the full list.
+
+The ping interval is new in `steve-3.15.0`. A proxy that closes idle
+WebSockets — upstream's comment puts managed ones at 60 to 100 s — cuts a
+charge point that has nothing to say for longer than its timeout; set the
+interval below it. Upstream's `application.yml` has no placeholder for it, so it is read
+through Spring's relaxed binding: `STEVE_OCPP_WS_PING_INTERVAL=3s` and
+`STEVE_OCPP_WSPINGINTERVAL=3s` both made SteVe ping an open session every
+3 s, and without either it sent none in that time (measured, arm64).
 
 The three `AUTH_*`/`WEBAPI_*` values seed the administrator SteVe creates when
 its database holds none, and are not read again: changing `AUTH_PASSWORD`
