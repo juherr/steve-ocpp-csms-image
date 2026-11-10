@@ -301,14 +301,13 @@ own for it to be relative to — give it an absolute path on the volume you
 mean. Not verified on each product; there are no vendor-specific steps in
 this document.
 
-**Platform.** A tag from before the multi-architecture build is
-`linux/amd64` alone, and at the time of writing that is every tag published,
-`steve-3.14.1` included: an ARM NAS or a Raspberry Pi does not run those
-natively, only under emulation where the host offers one, and that is not a
-supported setup. Native `linux/arm64` arrives with the first tag the
-multi-architecture build publishes, an index holding both platforms — the
-shape *Tags* shows. `docker buildx imagetools inspect` there tells which of
-the two a given tag is. Either way the host needs a 64-bit OS.
+**Platform.** A tag the multi-architecture build published is an index
+holding `linux/amd64` and `linux/arm64` — the shape *Tags* shows — and runs
+natively on an ARM NAS or a Raspberry Pi. A tag from before that build is
+`linux/amd64` alone — `steve-3.14.0` and `steve-3.13.0` are — and runs there
+only under emulation where the host offers one, which is not a supported
+setup. `docker buildx imagetools inspect` tells which of the two a given tag
+is. Either way the host needs a 64-bit OS.
 
 **Restart policy.** `restart: unless-stopped`, as in the Compose file above:
 the stack comes back after a host reboot, and a container stopped on purpose
@@ -316,8 +315,10 @@ with `docker compose stop` stays down until started again. (Docker's
 documented semantics for the policy; not re-measured here.)
 
 **What to persist and back up.** The application container is disposable:
-running, it writes nothing outside `/tmp` — a jar cache, the JVM's perf data
-and Jetty's compiled JSPs, per `docker diff` on `steve-3.14.1`. All state is
+running, it writes nothing outside `/tmp` — the JVM's perf data and Jetty's
+working directory, 48 KB after a sign-in and a dozen pages, per `docker diff`
+on `steve-3.15.0` (arm64; `steve-3.14.1` wrote 162 MB there, jar caches and
+compiled JSPs, which the move to Thymeleaf removed). All state is
 the MariaDB data directory, bind-mounted from `./data/mariadb`, so put that
 path on the volume the NAS backs up. A filesystem snapshot of a running data
 directory is not a consistent backup; the dump under *Upgrading*, step 1, is
@@ -394,7 +395,7 @@ renamed only when the command exits 0 — a refused login exits 2 and leaves a
 The password never appears on a command line: `MYSQL_PWD` is set inside the
 container, from the `MARIADB_PASSWORD` it was started with, so there is
 nothing to paste in and nothing left in the shell history. `--routines
---events` are there for the future: at `steve-3.14.1` the schema is 27 tables
+--events` are there for the future: at `steve-3.15.0` the schema is 27 tables
 and 4 views, which a bare dump already covers, but SteVe's migrations have
 carried a stored procedure and an event before, and those two flags are what
 keeps the dump complete if a release brings them back. The `steve` user is
