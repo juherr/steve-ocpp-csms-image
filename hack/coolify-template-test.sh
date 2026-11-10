@@ -34,7 +34,8 @@
 #
 # Given no IMAGE, the template runs as written — the tag Renovate moves is
 # pulled and booted on the pull request that moves it. Given one, it
-# replaces only the steve image, the rest of the template unchanged.
+# replaces only the steve image the installations boot, the rest of the
+# template unchanged; the checks of the file still read the tag it names.
 #
 # Usage:  ./hack/coolify-template-test.sh [IMAGE]
 # Env:    STEVE_TIMEOUT  seconds for both installations to become healthy
@@ -131,14 +132,17 @@ header "the magic variables"
 # Compose lists what it interpolates; a bare `- SERVICE_URL_X_PORT` entry is
 # passed through rather than interpolated, so it is read from the source form
 # of the environment — a list of K=V strings or a map, whichever was written.
-source_json=$(docker compose "${files[@]}" config --no-interpolate --format json) \
+# The template alone, without the IMAGE override: these checks are about the
+# file a one-click install runs, which names a published tag whatever image
+# the installations below are booted on.
+source_json=$(docker compose -f "${template}" config --no-interpolate --format json) \
   || fail "Compose cannot read the template (its error is above)"
 environment() {
   jq -r --arg s "$1" '.services[$s].environment // {}
     | if type == "array" then map(capture("^(?<k>[^=]+)(?<eq>=?)(?<v>.*)$")
         | {key: .k, value: (if .eq == "" then null else .v end)}) | from_entries else . end' <<<"${source_json}"
 }
-variables=$(docker compose "${files[@]}" config --variables --format json) \
+variables=$(docker compose -f "${template}" config --variables --format json) \
   || fail "Compose cannot list the template's variables"
 bare=$(jq -r '.services[].environment // {}
   | if type == "array" then .[] | select(contains("=") | not) else to_entries[] | select(.value == null) | .key end' <<<"${source_json}")
