@@ -38,7 +38,7 @@ env:
   # The major still moves through Renovate (docker versioning keeps the
   # precision it found), and `latest` would track no release line at all.
   # renovate: datasource=docker depName=renovate/renovate
-  RENOVATE_IMAGE: "renovate/renovate:44"
+  RENOVATE_IMAGE: "renovate/renovate:45"
   # renovate: datasource=docker depName=ghcr.io/zizmorcore/zizmor
   ZIZMOR_IMAGE: "ghcr.io/zizmorcore/zizmor:1.32.0"
 
