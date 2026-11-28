@@ -72,7 +72,7 @@ services:
     # A patch, not 11.8: tags are per server, and a floating one moves the
     # engine of every installation on it with no PR. Renovate proposes each
     # patch (measured with a lookup run), and the template test boots it.
-    image: mariadb:11.8.9
+    image: mariadb:11.8.10
     environment:
       # UTC is mandatory: SteVe requires the database and application time
       # zones to be aligned.
